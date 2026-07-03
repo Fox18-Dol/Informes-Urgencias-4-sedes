@@ -1156,12 +1156,28 @@ let usuarioCorreo = '';
 
 async function guardarEnSupabase(registros){
   if(!SUPABASE_ACTIVO) return {local:true};
+  // Solo enviamos las columnas que existen en la tabla; los campos calculados
+  // en memoria (medioMatriz, arl, particular, poliza, muniValle) se quedan fuera.
+  const paraGuardar = registros.map(r => ({
+    clinica: r.clinica,
+    sede: r.sede,
+    no_admision: r.no_admision,
+    fecha: r.fecha,
+    hora: r.hora,
+    medico: r.medico,
+    documento: r.documento,
+    paciente: r.paciente,
+    medio: r.medio,
+    aseguradora: r.aseguradora,
+    tipo: r.tipo,
+    municipio: r.municipio,
+  }));
   const LOTE = 500;
-  for(let i=0;i<registros.length;i+=LOTE){
-    const lote = registros.slice(i,i+LOTE);
+  for(let i=0;i<paraGuardar.length;i+=LOTE){
+    const lote = paraGuardar.slice(i,i+LOTE);
     const { error } = await sb.from('atenciones_urgencias').insert(lote);
     if(error) throw error;
-    actualizarProgreso(40 + Math.round((i/registros.length)*55));
+    actualizarProgreso(40 + Math.round((i/paraGuardar.length)*55));
   }
   return {local:false};
 }
@@ -1178,7 +1194,16 @@ async function cargarDesdeSupabase(){
     if(data.length < PAG) break;
     desde += PAG;
   }
-  return todos;
+  // Los campos derivados (medioMatriz, arl, particular, poliza, muniValle) no se
+  // guardan en la tabla; se recalculan aquí a partir de los valores ya normalizados.
+  return todos.map(r => ({
+    ...r,
+    medioMatriz: clasificarMedioMatriz(r.medio, r.sede),
+    arl: clasificarARL(r.aseguradora, r.sede),
+    particular: clasificarParticular(r.aseguradora, r.sede),
+    poliza: clasificarPoliza(r.aseguradora, r.sede),
+    muniValle: normMunicipioValle(r.municipio),
+  }));
 }
 
 /* ============================================================================
