@@ -1143,7 +1143,10 @@ function procesarLibro(workbook, nombreArchivo){
         particular: clasificarParticular(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
         poliza: clasificarPoliza(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
         muniValle: normMunicipioValle(c.municipio ? f[c.municipio] : null),
-        aseguradora: normAseguradora(c.aseguradora ? f[c.aseguradora] : null),
+        // guardamos el texto ORIGINAL (sin normalizar) de la aseguradora: se necesita completo
+        // (con palabras como "ARL", "ESTUDIANTIL", etc.) para poder reclasificar arl/particular/poliza
+        // correctamente cada vez que los datos se recargan desde Supabase.
+        aseguradora: c.aseguradora ? String(f[c.aseguradora]??'').trim() : null,
         tipo: tipoCalc,
         municipio: c.municipio ? normMunicipio(f[c.municipio]) : null,
       });
@@ -1201,7 +1204,8 @@ async function cargarDesdeSupabase(){
     desde += PAG;
   }
   // Los campos derivados (medioMatriz, arl, particular, poliza, muniValle) no se
-  // guardan en la tabla; se recalculan aquí a partir de los valores ya normalizados.
+  // guardan en la tabla; se recalculan aquí. 'aseguradora' se guarda en texto original
+  // (sin normalizar) precisamente para que esta reclasificación funcione bien.
   return todos.map(r => ({
     ...r,
     medioMatriz: clasificarMedioMatriz(r.medio, r.sede),
@@ -2380,7 +2384,9 @@ function dibujarMatriz(p, d){
 
   // ---- Encabezados ----
   // Por cada año: [mes, Δ%] x meses + Prom + Máx + Subtotal
-  let thAnios = '<th class="esq" rowspan="2">Medio de ingreso</th>';
+  const tituloColMap = { arl:'Entidad Aseguradora (ARL)', particular:'Entidad Aseguradora', poliza:'Entidad Aseguradora', muniValle:'Municipio' };
+  const tituloCol = tituloColMap[p.campoMatriz] || 'Medio de ingreso';
+  let thAnios = `<th class="esq" rowspan="2">${tituloCol}</th>`;
   let thMeses = '';
   anios.forEach(y=>{
     const nCols = porAnio[y].length*2 + 3; // mes+Δ por cada mes, + prom + máx + subtotal
@@ -2478,7 +2484,7 @@ function dibujarMatriz(p, d){
       <tbody>${cuerpo}</tbody>
       <tfoot><tr class="fila-total">${totalFila}</tr></tfoot>
     </table>`;
-  matrizDatos[p.id] = { medios, anios, porAnio, filasMedios };
+  matrizDatos[p.id] = { medios, anios, porAnio, filasMedios, tituloCol };
 
   // clic en el nombre del medio -> filtra la gráfica vinculada
   if(p.graficaVinculada){
@@ -2617,8 +2623,8 @@ function ocultarTabla(panelId){
 function exportarCSV(panelId){
   // caso especial: tabla matriz
   if(matrizDatos[panelId]){
-    const {medios, anios, porAnio, filasMedios} = matrizDatos[panelId];
-    let cab = 'Medio de ingreso';
+    const {medios, anios, porAnio, filasMedios, tituloCol} = matrizDatos[panelId];
+    let cab = tituloCol || 'Medio de ingreso';
     anios.forEach(y=>{
       porAnio[y].forEach(m=> cab += `,${MESES_CORTO[parseInt(m)-1]} ${y},Var% ${MESES_CORTO[parseInt(m)-1]} ${y}`);
       cab += `,Prom ${y},Max ${y},Subtot ${y}`;
