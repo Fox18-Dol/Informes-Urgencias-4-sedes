@@ -879,7 +879,8 @@ function normMedioDetalleBuga(v){
 
 // Clasifica la ENTIDAD ASEGURADORA como ARL. Devuelve el nombre de la serie ARL
 // o null si el registro NO es ARL (solo cuenta riesgos laborales, no SOAT/salud).
-function clasificarARL(v, sede){
+function clasificarARL(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // ARL solo aplica a atención tipo "Otros" (no SOAT)
   let s = base(v);
   if(!s) return null;
   const esARL = /ARL/.test(s);   // debe estar marcado explícitamente como ARL
@@ -913,7 +914,8 @@ function clasificarARL(v, sede){
 
 // Clasifica la ENTIDAD ASEGURADORA como Particular / Prepagada / Plan Complementario.
 // Devuelve el nombre de una de las 8 series oficiales, o null si no encaja.
-function clasificarParticular(v, sede){
+function clasificarParticular(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // Particular/PPP solo aplica a atención tipo "Otros" (no SOAT)
   let s = base(v);
   if(!s) return null;
   // excluir explícitamente lo que es ARL o SOAT (van en otras tablas)
@@ -959,7 +961,8 @@ function clasificarParticular(v, sede){
 
 // Clasifica la ENTIDAD ASEGURADORA como Póliza Estudiantil / Salud.
 // Devuelve una de las 12 series oficiales, o null si no encaja (excluye SOAT/ARL).
-function clasificarPoliza(v, sede){
+function clasificarPoliza(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // Pólizas estudiantiles solo aplica a atención tipo "Otros" (no SOAT)
   let s = base(v);
   if(!s) return null;
   if(/ARL/.test(s)) return null;   // ARL va en otra tabla
@@ -1124,6 +1127,7 @@ function procesarLibro(workbook, nombreArchivo){
     filas.forEach(f => {
       const fechaISO = c.fecha ? aISO(f[c.fecha]) : null;
       if(!fechaISO) return; // sin fecha no sirve para tendencia
+      const tipoCalc = normTipo(c.tipo ? f[c.tipo] : null);
       registros.push({
         clinica, sede,
         no_admision:  c.admision ? String(f[c.admision]??'').trim() : null,
@@ -1135,12 +1139,12 @@ function procesarLibro(workbook, nombreArchivo){
         paciente:  c.paciente ? String(f[c.paciente]??'').trim() : null,
         medio: normMedio(c.medio ? f[c.medio] : null),
         medioMatriz: clasificarMedioMatriz(c.medio ? f[c.medio] : null, sede),
-        arl: clasificarARL(c.aseguradora ? f[c.aseguradora] : null, sede),
-        particular: clasificarParticular(c.aseguradora ? f[c.aseguradora] : null, sede),
-        poliza: clasificarPoliza(c.aseguradora ? f[c.aseguradora] : null, sede),
+        arl: clasificarARL(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
+        particular: clasificarParticular(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
+        poliza: clasificarPoliza(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
         muniValle: normMunicipioValle(c.municipio ? f[c.municipio] : null),
         aseguradora: normAseguradora(c.aseguradora ? f[c.aseguradora] : null),
-        tipo: normTipo(c.tipo ? f[c.tipo] : null),
+        tipo: tipoCalc,
         municipio: c.municipio ? normMunicipio(f[c.municipio]) : null,
       });
     });
@@ -1201,9 +1205,9 @@ async function cargarDesdeSupabase(){
   return todos.map(r => ({
     ...r,
     medioMatriz: clasificarMedioMatriz(r.medio, r.sede),
-    arl: clasificarARL(r.aseguradora, r.sede),
-    particular: clasificarParticular(r.aseguradora, r.sede),
-    poliza: clasificarPoliza(r.aseguradora, r.sede),
+    arl: clasificarARL(r.aseguradora, r.sede, r.tipo),
+    particular: clasificarParticular(r.aseguradora, r.sede, r.tipo),
+    poliza: clasificarPoliza(r.aseguradora, r.sede, r.tipo),
     muniValle: normMunicipioValle(r.municipio),
   }));
 }
