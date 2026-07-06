@@ -1175,7 +1175,9 @@ async function guardarEnSupabase(registros){
   const LOTE = 500;
   for(let i=0;i<paraGuardar.length;i+=LOTE){
     const lote = paraGuardar.slice(i,i+LOTE);
-    const { error } = await sb.from('atenciones_urgencias').insert(lote);
+    // upsert: si (sede, no_admision) ya existe, se ignora en vez de duplicarse
+    const { error } = await sb.from('atenciones_urgencias')
+      .upsert(lote, { onConflict:'sede,no_admision', ignoreDuplicates:true });
     if(error) throw error;
     actualizarProgreso(40 + Math.round((i/paraGuardar.length)*55));
   }
