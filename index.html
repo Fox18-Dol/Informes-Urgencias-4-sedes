@@ -2380,6 +2380,3346 @@ function dibujarMatriz(p, d){
 
   // ---- Encabezados ----
   // Por cada año: [mes, Δ%] x meses + Prom + Máx + Subtotal
+  const tituloColMap = { arl:'Entidad Aseguradora (ARL)', particular:'Entidad Aseguradora', poliza:'Entidad Aseguradora', muniValle:'Municipio' };
+  const tituloCol = tituloColMap[p.campoMatriz] || 'Medio de ingreso';
+  let thAnios = `<th class="esq" rowspan="2">${tituloCol}</th>`;
+  let thMeses = '';
+  anios.forEach(y=>{
+    const nCols = porAnio[y].length*2 + 3; // mes+Δ por cada mes, + prom + máx + subtotal
+    thAnios += `<th colspan="${nCols}" class="anio">${y}</th>`;
+    porAnio[y].forEach(m=>{
+      thMeses += `<th>${MESES_CORTO[parseInt(m)-1]}</th><th class="dcol">Δ%</th>`;
+    });
+    thMeses += `<th class="prom">Prom</th><th class="max">Máx</th><th class="subtot">Subtot</th>`;
+  });
+
+  // ---- Filas de datos ----
+  const chipVar = (pct)=>{
+    if(pct===null) return `<td class="dcol"><span class="vchip neutro">–</span></td>`;
+    const cls = pct>0?'verde':(pct<0?'rojo':'neutro');
+    const fl = pct>0?'▲':(pct<0?'▼':'');
+    const signo = pct>0?'+':'';
+    return `<td class="dcol"><span class="vchip ${cls}">${fl}${signo}${pct.toFixed(0)}%</span></td>`;
+  };
+
+  let cuerpo = '';
+  filasMedios.forEach(med=>{
+    let fila = `<td class="medio clickable" data-medio="${med.replace(/"/g,'&quot;')}">${med}</td>`;
+    anios.forEach(y=>{
+      const valores = porAnio[y].map(m=> medios[med][`${y}-${m}`] || 0);
+      // celdas mes + variación vs mes anterior (dentro del año)
+      valores.forEach((v,idx)=>{
+        fila += `<td>${v||''}</td>`;
+        let pct = null;
+        if(idx>0){
+          const prev = valores[idx-1];
+          if(prev>0) pct = ((v-prev)/prev)*100;
+          else if(prev===0 && v>0) pct = 100;
+          else if(prev===0 && v===0) pct = 0;
+        } else if(porAnio[y][idx]==='01'){
+          // enero: comparar contra diciembre del año anterior (para no dejar el dato vacío)
+          const prev = medios[med][`${parseInt(y)-1}-12`];
+          if(prev!==undefined){
+            if(prev>0) pct = ((v-prev)/prev)*100;
+            else if(prev===0 && v>0) pct = 100;
+            else if(prev===0 && v===0) pct = 0;
+          }
+        }
+        fila += chipVar(pct);
+      });
+      // promedio y máximo de los meses de ESE año
+      const prom = valores.length ? (valores.reduce((a,b)=>a+b,0)/valores.length) : 0;
+      const max = valores.length ? Math.max(...valores) : 0;
+      const subt = valores.reduce((a,b)=>a+b,0);
+      fila += `<td class="prom">${prom.toFixed(1)}</td><td class="max">${max||''}</td><td class="subtot">${subt||''}</td>`;
+    });
+    cuerpo += `<tr>${fila}</tr>`;
+  });
+
+  // ---- Fila de totales por columna ----
+  // La celda "Total general" también es clicable (muestra la línea del total en la gráfica)
+  let totalFila = p.graficaVinculada
+    ? '<td class="medio clickable" data-medio="__total__">Total general</td>'
+    : '<td class="medio">Total general</td>';
+  anios.forEach(y=>{
+    const colTotales = porAnio[y].map(m=> filasMedios.reduce((a,med)=>a+(medios[med][`${y}-${m}`]||0),0));
+    colTotales.forEach((ct,idx)=>{
+      totalFila += `<td>${ct||''}</td>`;
+      // variación del total mes a mes
+      let pct = null;
+      if(idx>0){
+        const prev = colTotales[idx-1];
+        if(prev>0) pct = ((ct-prev)/prev)*100;
+        else if(prev===0 && ct>0) pct = 100;
+        else if(prev===0 && ct===0) pct = 0;
+      } else if(porAnio[y][idx]==='01'){
+        // enero: comparar contra el total de diciembre del año anterior
+        const anioAnterior = parseInt(y)-1;
+        let prev = 0, huboDatos = false;
+        filasMedios.forEach(med=>{
+          const val = medios[med][`${anioAnterior}-12`];
+          if(val!==undefined){ prev += val; huboDatos = true; }
+        });
+        if(huboDatos){
+          if(prev>0) pct = ((ct-prev)/prev)*100;
+          else if(prev===0 && ct>0) pct = 100;
+          else if(prev===0 && ct===0) pct = 0;
+        }
+      }
+      totalFila += chipVar(pct);
+    });
+    const promT = colTotales.length ? (colTotales.reduce((a,b)=>a+b,0)/colTotales.length) : 0;
+    const maxT = colTotales.length ? Math.max(...colTotales) : 0;
+    const subT = colTotales.reduce((a,b)=>a+b,0);
+    totalFila += `<td class="prom">${promT.toFixed(1)}</td><td class="max">${maxT||''}</td><td class="subtot">${subT||''}</td>`;
+  });
+
+  cont.innerHTML = `
+    <table class="matriz">
+      <thead><tr>${thAnios}</tr><tr>${thMeses}</tr></thead>
+      <tbody>${cuerpo}</tbody>
+      <tfoot><tr class="fila-total">${totalFila}</tr></tfoot>
+    </table>`;
+  matrizDatos[p.id] = { medios, anios, porAnio, filasMedios, tituloCol };
+
+  // clic en el nombre del medio -> filtra la gráfica vinculada
+  if(p.graficaVinculada){
+    cont.querySelectorAll('td.medio.clickable').forEach(td=>{
+      td.addEventListener('click', ()=> seleccionarMedioMatriz(p, td.dataset.medio));
+    });
+    // mantener resaltado si ya hay un medio seleccionado
+    const grafica = PANELES.find(q=>q.id===p.graficaVinculada);
+    if(grafica && grafica.estado.medioSel){
+      cont.querySelectorAll('td.medio').forEach(td=>{
+        td.classList.toggle('fila-sel', td.dataset.medio===grafica.estado.medioSel);
+      });
+    }
+  }
+}
+
+function pintarBotonAnioMatriz(p, anios){
+  const cont = document.getElementById('mAnio_'+p.id);
+  if(!cont) return;
+  const opciones = [['','Todos'], ...anios.map(a=>[a,a])];
+  cont.innerHTML = '<span class="et">Año</span>' + opciones.map(([val,txt])=>
+    `<button class="cbtn ${String(p.estado.anioSel)===String(val)?'on':''}" data-val="${val}">${txt}</button>`
+  ).join('');
+  cont.querySelectorAll('.cbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      p.estado.anioSel = b.dataset.val;
+      dibujarPanel(p);
+      // sincronizar el año con la gráfica vinculada
+      if(p.graficaVinculada){
+        const grafica = PANELES.find(q=>q.id===p.graficaVinculada);
+        if(grafica){
+          grafica.estado.anioForzado = b.dataset.val;  // '' = todos
+          // reflejar visualmente en los botones de granularidad/indicador si hace falta
+          dibujarPanel(grafica);
+          actualizarIndicadorAnio(grafica);
+        }
+      }
+    });
+  });
+}
+
+// Botón Top para reducir la matriz (muestra solo las N filas con más registros)
+function pintarBotonTopMatriz(p, totalFilas){
+  const cont = document.getElementById('mTop_'+p.id);
+  if(!cont) return;
+  // opciones razonables según cuántas filas hay
+  const posibles = [5, 10, 15, 20].filter(n=> n < totalFilas);
+  const opciones = [[0,'Todos'], ...posibles.map(n=>[n, String(n)])];
+  // si solo hay una opción (Todos), ocultamos el grupo para no estorbar
+  if(opciones.length<=1){ cont.style.display='none'; return; }
+  cont.style.display='';
+  cont.innerHTML = '<span class="et">Top</span>' + opciones.map(([val,txt])=>
+    `<button class="cbtn ${Number(p.estado.topSel)===Number(val)?'on':''}" data-val="${val}">${txt}</button>`
+  ).join('');
+  cont.querySelectorAll('.cbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      p.estado.topSel = parseInt(b.dataset.val);
+      dibujarPanel(p);
+    });
+  });
+}
+
+// Muestra/oculta un pequeño indicador del año activo en la gráfica vinculada
+function actualizarIndicadorAnio(grafica){
+  const cab = document.querySelector('#panel_'+grafica.id+' .serie-cab');
+  if(!cab) return;
+  let ind = document.getElementById('anioind_'+grafica.id);
+  if(grafica.estado.anioForzado){
+    if(!ind){
+      ind = document.createElement('span');
+      ind.id = 'anioind_'+grafica.id;
+      ind.className = 'anio-ind';
+      cab.appendChild(ind);
+    }
+    ind.textContent = 'Año: '+grafica.estado.anioForzado;
+    ind.style.display = '';
+  } else if(ind){
+    ind.style.display = 'none';
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Tabla de validación lateral
+---------------------------------------------------------------------------- */
+let tablasDatos = {};  // guarda datos para exportar a CSV
+function pintarTabla(panelId, filas, total){
+  tablasDatos[panelId] = {filas, total};
+  document.getElementById('tot_'+panelId).textContent = total.toLocaleString('es-CO');
+  const cont = document.getElementById('tab_'+panelId);
+  if(!filas.length){ cont.innerHTML='<div class="vacio">Sin datos para este filtro</div>'; return; }
+  cont.innerHTML = '<table>' + filas.map(([etq,val])=>{
+    const pct = total? Math.round(val/total*100) : 0;
+    return `<tr><td class="etq" title="${etq}">${etq}</td><td class="val">${val.toLocaleString('es-CO')}</td><td class="pct">${pct}%</td></tr>`;
+  }).join('') + '</table>';
+}
+
+// Tabla con % de variación respecto al mes (fila) inmediatamente anterior
+function pintarTablaVariacion(panelId, filas, total){
+  // guardamos también la variación para el CSV
+  const conVar = filas.map(([etq,val],i)=>{
+    let pct = null;
+    if(i>0){
+      const prev = filas[i-1][1];
+      if(prev>0) pct = ((val-prev)/prev)*100;
+      else if(prev===0 && val>0) pct = 100;
+    }
+    return [etq, val, pct];
+  });
+  tablasDatos[panelId] = {filas, total, variacion:conVar};
+  document.getElementById('tot_'+panelId).textContent = total.toLocaleString('es-CO');
+  const cont = document.getElementById('tab_'+panelId);
+  if(!filas.length){ cont.innerHTML='<div class="vacio">Sin datos para este filtro</div>'; return; }
+  cont.innerHTML = '<table>' + conVar.map(([etq,val,pct])=>{
+    let chip;
+    if(pct===null){
+      chip = `<span class="vchip neutro">–</span>`;
+    } else {
+      const cls = pct>0?'verde':(pct<0?'rojo':'neutro');
+      const fl = pct>0?'▲':(pct<0?'▼':'');
+      const signo = pct>0?'+':'';
+      chip = `<span class="vchip ${cls}">${fl} ${signo}${pct.toFixed(1)}%</span>`;
+    }
+    return `<tr><td class="etq" title="${etq}">${etq}</td><td class="val">${val.toLocaleString('es-CO')}</td><td class="pct-var">${chip}</td></tr>`;
+  }).join('') + '</table>';
+}
+
+// Oculta la tabla lateral de un panel y ensancha el gráfico
+function ocultarTabla(panelId){
+  const cuerpo = document.getElementById('cuerpo_'+panelId);
+  if(cuerpo){
+    cuerpo.classList.add('solo-grafico');
+    const tv = cuerpo.querySelector('.tabla-val');
+    if(tv) tv.style.display='none';
+  }
+}
+function exportarCSV(panelId){
+  // caso especial: tabla matriz
+  if(matrizDatos[panelId]){
+    const {medios, anios, porAnio, filasMedios, tituloCol} = matrizDatos[panelId];
+    let cab = tituloCol || 'Medio de ingreso';
+    anios.forEach(y=>{
+      porAnio[y].forEach(m=> cab += `,${MESES_CORTO[parseInt(m)-1]} ${y},Var% ${MESES_CORTO[parseInt(m)-1]} ${y}`);
+      cab += `,Prom ${y},Max ${y},Subtot ${y}`;
+    });
+    cab += '\n';
+    let cuerpo = '';
+    filasMedios.forEach(med=>{
+      let fila = `"${med}"`;
+      anios.forEach(y=>{
+        const valores = porAnio[y].map(m=> medios[med][`${y}-${m}`]||0);
+        valores.forEach((v,idx)=>{
+          let pct='';
+          if(idx>0){ const prev=valores[idx-1]; if(prev>0) pct=`${(((v-prev)/prev)*100).toFixed(0)}%`; else if(prev===0&&v>0) pct='100%'; else pct='0%'; }
+          fila += `,${v},${pct}`;
+        });
+        const prom=valores.length?(valores.reduce((a,b)=>a+b,0)/valores.length):0;
+        const max=valores.length?Math.max(...valores):0;
+        const subt=valores.reduce((a,b)=>a+b,0);
+        fila += `,${prom.toFixed(1)},${max},${subt}`;
+      });
+      cuerpo += fila+'\n';
+    });
+    const blob = new Blob([cab+cuerpo],{type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`${panelId}_matriz.csv`; a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  const t = tablasDatos[panelId];
+  if(!t || !t.filas.length){ toast('No hay datos para exportar','err'); return; }
+  let csv, contenido;
+  if(t.variacion){
+    // tabla con variación vs periodo anterior
+    csv = 'Periodo,Atenciones,Variacion_vs_anterior\n';
+    contenido = t.variacion.map(([etq,val,pct])=>{
+      const v = pct===null ? 'n/a' : `${pct>0?'+':''}${pct.toFixed(1)}%`;
+      return `"${etq}",${val},${v}`;
+    }).join('\n');
+  } else {
+    csv = 'Categoria,Atenciones,Porcentaje\n';
+    contenido = t.filas.map(([etq,val])=>{
+      const pct = t.total? (val/t.total*100).toFixed(1):0;
+      return `"${etq}",${val},${pct}%`;
+    }).join('\n');
+    contenido += `\n"TOTAL",${t.total},100%`;
+  }
+  const blob = new Blob([csv+contenido],{type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=`${panelId}_datos.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ============================================================================
+   7. KPIs con variación vs mes anterior + semáforo
+============================================================================ */
+function tarjetaKPI(label, info, extraTxt, filtro){
+  const sem = semaforo(info.pct);
+  const variacion = info.pct===null
+    ? `<span class="variacion neutro">${flecha(info.pct)} ${fmtPct(info.pct)}</span>`
+    : `<span class="variacion ${sem}">${flecha(info.pct)} ${fmtPct(info.pct)}</span>`;
+  const cls = filtro ? 'kpi clickable-kpi' : 'kpi';
+  const attr = filtro ? ` data-kpifiltro="${filtro}"` : '';
+  return `
+    <div class="${cls} sem-${sem}"${attr}>
+      <span class="semaforo ${sem}"></span>
+      <div class="label">${label}</div>
+      <div class="fila-valor">
+        <span class="valor">${info.actual.toLocaleString('es-CO')}</span>
+        ${variacion}
+      </div>
+      <div class="extra">${extraTxt}</div>
+    </div>`;
+}
+
+// Subtarjeta compacta (para Nuevas / Reconsultas dentro del bloque SOAT)
+function subtarjeta(label, info, filtro){
+  const sem = semaforo(info.pct);
+  const variacion = `<span class="variacion mini ${sem}">${flecha(info.pct)} ${fmtPct(info.pct)}</span>`;
+  const cls = filtro ? 'subkpi clickable-kpi' : 'subkpi';
+  const attr = filtro ? ` data-kpifiltro="${filtro}"` : '';
+  return `
+    <div class="${cls} sem-${sem}"${attr}>
+      <div class="sub-label" title="${label}">${label}</div>
+      <div class="sub-fila">
+        <span class="sub-valor">${info.actual.toLocaleString('es-CO')}</span>
+        ${variacion}
+      </div>
+    </div>`;
+}
+
+// Bloque: tarjeta principal + subtarjetas apiladas a su derecha (arriba->abajo)
+function bloqueConSubs(cardPrincipal, subcards){
+  const subs = subcards.map(s=>subtarjeta(s.label, s.info, s.filtro)).join('');
+  return `
+    <div class="kpi-bloque">
+      ${cardPrincipal}
+      <div class="subkpi-grupo">${subs}</div>
+    </div>`;
+}
+
+// Estado del periodo de las tarjetas KPI (vacío = último mes con datos)
+const kpiPeriodo = { anio:'', mes:'' };
+
+function pintarKPIs(d){
+  const cont = document.getElementById('kpis');
+  const todosMeses = mesesOrdenados(d);
+
+  // --- determinar el mes de referencia según los botones (o el último con datos) ---
+  let mesRef;
+  if(kpiPeriodo.anio && kpiPeriodo.mes){
+    mesRef = `${kpiPeriodo.anio}-${kpiPeriodo.mes}`;
+  } else if(kpiPeriodo.anio && !kpiPeriodo.mes){
+    // año elegido sin mes -> último mes con datos de ese año
+    const delAnio = todosMeses.filter(m=>m.slice(0,4)===kpiPeriodo.anio);
+    mesRef = delAnio.length ? delAnio[delAnio.length-1] : null;
+  } else {
+    mesRef = todosMeses.length ? todosMeses[todosMeses.length-1] : null;
+  }
+
+  // dibujar los botones de año/mes
+  pintarSelectorKPI(d, todosMeses);
+
+  const etiqMes = mesRef ? nombreMes(mesRef) : 'sin datos';
+  // mes anterior (para "vs") = el inmediatamente previo en la lista global
+  const idx = mesRef ? todosMeses.indexOf(mesRef) : -1;
+  const mesPrev = idx>0 ? todosMeses[idx-1] : null;
+  const etiqVs = mesPrev ? `vs ${nombreMes(mesPrev)}` : 'sin mes previo';
+
+  // variación de un subconjunto para el mes de referencia elegido
+  const varMesRef = (filtroFn)=>{
+    const sub = filtroFn ? d.filter(filtroFn) : d;
+    const actual = mesRef ? sub.filter(x=>x.fecha.slice(0,7)===mesRef).length : 0;
+    const previo = mesPrev ? sub.filter(x=>x.fecha.slice(0,7)===mesPrev).length : 0;
+    let pct = null;
+    if(mesPrev && previo>0) pct = ((actual-previo)/previo)*100;
+    else if(mesPrev && previo===0 && actual>0) pct = 100;
+    return {actual, previo, pct};
+  };
+
+  const tarjetas = [];
+
+  // 1) Total de atenciones del mes de referencia
+  tarjetas.push(tarjetaKPI(`Atenciones · ${etiqMes}`, varMesRef(null), etiqVs, 'todas'));
+
+  // 2) SOAT + subtarjetas Nuevas / Reconsultas (solo sobre SOAT)
+  const infoSoat   = varMesRef(x=>x.tipo==='SOAT');
+  const infoRecon  = varMesRef(x=>x.tipo==='SOAT' && x.medio==='Reconsulta');
+  const infoNuevas = varMesRef(x=>x.tipo==='SOAT' && x.medio!=='Reconsulta');
+  tarjetas.push(bloqueConSubs(
+    tarjetaKPI(`SOAT · ${etiqMes}`, infoSoat, etiqVs, 'soat'),
+    [ {label:'Nuevas', info:infoNuevas, filtro:'soat_nuevas'},
+      {label:'Reconsultas', info:infoRecon, filtro:'soat_recon'} ]
+  ));
+
+  // 3) OTROS + subtarjetas ARL / PPP / Pólizas Estudiantiles (sobre registros OTROS)
+  const infoOtros = varMesRef(x=>x.tipo!=='SOAT');
+  const infoARL   = varMesRef(x=>x.tipo!=='SOAT' && x.arl);
+  const infoPPP   = varMesRef(x=>x.tipo!=='SOAT' && x.particular);
+  const infoPol   = varMesRef(x=>x.tipo!=='SOAT' && x.poliza);
+  tarjetas.push(bloqueConSubs(
+    tarjetaKPI(`OTROS · ${etiqMes}`, infoOtros, etiqVs, 'otros'),
+    [ {label:'Clientes ARL', info:infoARL, filtro:'otros_arl'},
+      {label:'Clientes PPP', info:infoPPP, filtro:'otros_ppp'},
+      {label:'Pólizas Estudiantiles', info:infoPol, filtro:'otros_poliza'} ]
+  ));
+
+  if(contexto.vista==='general'){
+    tarjetas.push(tarjetaKPI(`Dolormed · ${etiqMes}`, varMesRef(x=>x.clinica==='Dolormed'), etiqVs));
+    tarjetas.push(tarjetaKPI(`RedesImat · ${etiqMes}`, varMesRef(x=>x.clinica==='RedesImat'), etiqVs));
+  } else {
+    const diasMes = mesRef ? new Set(d.filter(x=>x.fecha.slice(0,7)===mesRef).map(x=>x.fecha)).size || 1 : 1;
+    const vt = varMesRef(null);
+    tarjetas.push(tarjetaKPI(`Promedio diario · ${etiqMes}`, {actual:+(vt.actual/diasMes).toFixed(1), pct:vt.pct}, 'atenciones/día'));
+    tarjetas.push(tarjetaKPI('Promedio atenciones · últimos 3 meses', prom3Meses(d), promedio3Sub(todosMeses)));
+  }
+
+  cont.innerHTML = tarjetas.join('');
+
+  // vincular tarjetas clicables a la gráfica Comportamiento Ingresos Urgencia
+  const tend = PANELES.find(p=>p.id==='tendencia');
+  cont.querySelectorAll('.clickable-kpi').forEach(el=>{
+    const f = el.dataset.kpifiltro;
+    if(tend && tend.estado.kpiFiltro===f) el.classList.add('kpi-activa');
+    el.addEventListener('click', ()=>{
+      if(!tend) return;
+      // toggle: si ya estaba activa, se quita
+      tend.estado.kpiFiltro = (tend.estado.kpiFiltro===f) ? '' : f;
+      dibujarPanel(tend);
+      pintarKPIs(aplicarFiltros());  // repinta para actualizar el resaltado
+    });
+  });
+}
+
+// Botones de año y mes para elegir el periodo de las tarjetas
+function pintarSelectorKPI(d, todosMeses){
+  const cont = document.getElementById('kpiSelector');
+  if(!cont) return;
+  const anios = [...new Set(todosMeses.map(m=>m.slice(0,4)))].sort();
+  // meses disponibles según año elegido
+  const mesesDisp = kpiPeriodo.anio
+    ? todosMeses.filter(m=>m.slice(0,4)===kpiPeriodo.anio).map(m=>m.slice(5,7))
+    : [];
+  let html = '<div class="kpi-sel-grupo"><span class="kpi-sel-et">Periodo</span>';
+  html += `<button class="kbtn ${!kpiPeriodo.anio?'on':''}" data-tipo="anio" data-val="">Último mes</button>`;
+  anios.forEach(a=> html += `<button class="kbtn ${kpiPeriodo.anio===a?'on':''}" data-tipo="anio" data-val="${a}">${a}</button>`);
+  html += '</div>';
+  if(kpiPeriodo.anio && mesesDisp.length){
+    html += '<div class="kpi-sel-grupo"><span class="kpi-sel-et">Mes</span>';
+    html += `<button class="kbtn ${!kpiPeriodo.mes?'on':''}" data-tipo="mes" data-val="">Todos</button>`;
+    mesesDisp.forEach(m=> html += `<button class="kbtn ${kpiPeriodo.mes===m?'on':''}" data-tipo="mes" data-val="${m}">${MESES_CORTO[parseInt(m)-1]}</button>`);
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+  cont.querySelectorAll('.kbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if(b.dataset.tipo==='anio'){ kpiPeriodo.anio=b.dataset.val; kpiPeriodo.mes=''; }
+      else { kpiPeriodo.mes=b.dataset.val; }
+      pintarKPIs(aplicarFiltros());
+    });
+  });
+}
+
+// Promedio mensual de atenciones sobre los últimos 3 meses con datos
+function prom3Meses(d){
+  const meses = mesesOrdenados(d);
+  const ult3 = meses.slice(-3);
+  if(ult3.length===0) return {actual:0, pct:null};
+  const totales = ult3.map(mm=>d.filter(x=>x.fecha.slice(0,7)===mm).length);
+  const prom = totales.reduce((a,b)=>a+b,0)/ult3.length;
+  // variación: promedio últimos 3 vs 3 meses previos
+  const prev3 = meses.slice(-6,-3);
+  let pct = null;
+  if(prev3.length){
+    const totPrev = prev3.map(mm=>d.filter(x=>x.fecha.slice(0,7)===mm).length);
+    const promPrev = totPrev.reduce((a,b)=>a+b,0)/prev3.length;
+    if(promPrev>0) pct = ((prom-promPrev)/promPrev)*100;
+  }
+  return {actual: Math.round(prom), pct};
+}
+function promedio3Sub(meses){
+  const ult3 = meses.slice(-3);
+  if(!ult3.length) return 'sin datos';
+  return `media de ${ult3.map(m=>MESES[parseInt(m.slice(5,7))-1]).join(', ')}`;
+}
+
+/* ============================================================================
+   8. RENDER GENERAL
+============================================================================ */
+let panelesConstruidos = false;
+function render(){
+  if(!DATOS.length){
+    document.getElementById('estadoVacio').classList.remove('hidden');
+    document.getElementById('tablero').classList.add('hidden');
+    return;
+  }
+  document.getElementById('estadoVacio').classList.add('hidden');
+  document.getElementById('tablero').classList.remove('hidden');
+  if(!panelesConstruidos){ construirPaneles(); panelesConstruidos=true; }
+  // repoblar filtros multi por si cambió el contexto (sede con distintos años/municipios)
+  PANELES.forEach(poblarFiltrosPanel);
+  const d = aplicarFiltros();
+  pintarKPIs(d);
+  PANELES.forEach(dibujarPanel);
+  // reflejar en las gráficas vinculadas el indicador de medio/total seleccionado y el año forzado
+  PANELES.forEach(p=>{
+    if(p.matrizVinculada){ marcarFilaMatriz(p); if(p.estado.anioForzado) actualizarIndicadorAnio(p); }
+  });
+  // ocultar secciones cuyos paneles quedaron todos ocultos (p.ej. secciones solo-Tuluá en otra vista)
+  SECCIONES.forEach(sec=>{
+    const secEl = document.getElementById('sec_'+sec.id);
+    if(!secEl) return;
+    // secciones marcadas para ocultarse en la vista general
+    if(sec.ocultarEnGeneral && contexto.vista==='general'){ secEl.style.display='none'; return; }
+    if(sec.kpis){ secEl.style.display=''; return; }  // la general siempre visible (tiene KPIs)
+    const panelesSec = PANELES.filter(p=>p.seccion===sec.id);
+    const algunoVisible = panelesSec.some(p=>{
+      const el = document.getElementById('panel_'+p.id);
+      return el && el.style.display!=='none';
+    });
+    secEl.style.display = algunoVisible ? '' : 'none';
+  });
+  // título dinámico de la sección "Alto Valor": en Zarzal/Cerrito se llama solo "Clientes"
+  const tituloAltoEl = document.querySelector('#sec_alto .acordeon-tit');
+  if(tituloAltoEl){
+    const esZarzalCerrito = contexto.vista==='sede' && (contexto.sede==='Zarzal' || contexto.sede==='Cerrito');
+    tituloAltoEl.textContent = esZarzalCerrito ? '2. Clientes' : '2. Clientes Alto Valor';
+    const descMatrizAlto = document.getElementById('desc_matrizalto');
+    if(descMatrizAlto){
+      descMatrizAlto.textContent = esZarzalCerrito
+        ? 'Todos los medios de ingreso, por mes.'
+        : 'Medios principales (911, propios medios, Emergency Time y Ambulancias RedesImat) por mes.';
+    }
+  }
+}
+
+/* ============================================================================
+   8b. VISTA DE COMPARACIÓN entre clínicas y sedes
+============================================================================ */
+function filaComparativa(nombre, datos, colorPunto){
+  const v = variacionMensual(datos, null);
+  const dias = new Set(datos.map(x=>x.fecha)).size || 1;
+  const promDia = (datos.length/dias).toFixed(1);
+  const soat = datos.filter(x=>x.tipo==='SOAT').length;
+  const pctSoat = datos.length? Math.round(soat/datos.length*100):0;
+  const sem = semaforo(v.pct);
+  const chip = v.pct===null
+    ? `<span class="var-chip neutro">–</span>`
+    : `<span class="var-chip ${sem}">${flecha(v.pct)} ${fmtPct(v.pct)}</span>`;
+  const punto = colorPunto ? `<span class="pt" style="background:${colorPunto}"></span>` : '';
+  return `<tr>
+    <td><span class="badge-clinica">${punto}${nombre}</span></td>
+    <td class="dato">${datos.length.toLocaleString('es-CO')}</td>
+    <td class="dato">${v.actual.toLocaleString('es-CO')}</td>
+    <td>${chip}</td>
+    <td>${promDia}</td>
+    <td>${pctSoat}%</td>
+  </tr>`;
+}
+
+// Estado de la vista comparación: mes de referencia + filtro de tarjeta para el gráfico
+// Las dos comparaciones por sede. Cada una tiene su propio estado (periodo + filtro de tarjeta).
+const COMPARACIONES = [
+  { id:'c1', num:'1', titulo:'Comparación Dolormed Tuluá vs RedesImat Buga',
+    a:{clinica:'Dolormed', sede:'Tulua', label:'Dolormed Tuluá', color:'verde'},
+    b:{clinica:'RedesImat', sede:'Buga',  label:'RedesImat Buga', color:'redes'} },
+  { id:'c2', num:'2', titulo:'Comparación Dolormed Zarzal vs RedesImat Cerrito',
+    a:{clinica:'Dolormed', sede:'Zarzal',  label:'Dolormed Zarzal', color:'verde'},
+    b:{clinica:'RedesImat', sede:'Cerrito', label:'RedesImat Cerrito', color:'redes'} },
+];
+// estado por comparación
+const compEstado = {
+  c1:{ anio:'', mes:'', kpiFiltro:'todas' },
+  c2:{ anio:'', mes:'', kpiFiltro:'todas' },
+};
+
+// filtros de categoría compartidos
+const COMP_FILTROS = {
+  todas:()=>true, soat:x=>x.tipo==='SOAT',
+  soat_nuevas:x=>x.tipo==='SOAT'&&x.medio!=='Reconsulta', soat_recon:x=>x.tipo==='SOAT'&&x.medio==='Reconsulta',
+  otros:x=>x.tipo!=='SOAT', otros_arl:x=>x.tipo!=='SOAT'&&x.arl, otros_ppp:x=>x.tipo!=='SOAT'&&x.particular, otros_poliza:x=>x.tipo!=='SOAT'&&x.poliza,
+};
+const COMP_ETIQUETAS = {todas:'Todas las atenciones',soat:'SOAT',soat_nuevas:'SOAT nuevas',soat_recon:'SOAT reconsultas',otros:'OTROS',otros_arl:'Clientes ARL',otros_ppp:'Clientes PPP',otros_poliza:'Pólizas Estudiantiles'};
+
+function renderComparacion(){
+  const cont = document.getElementById('vistaComparacion');
+  cont.innerHTML = `
+    <div class="vista-cab">
+      <h2>Comparación por sedes</h2>
+      <p>Dos comparaciones independientes. Presiona una tarjeta para ver su comportamiento mensual.</p>
+    </div>` +
+    COMPARACIONES.map(c=>`
+      <section class="acordeon abierta" id="seccomp_${c.id}">
+        <button class="acordeon-cab" data-seccomp="${c.id}">
+          <span class="acordeon-tit">${c.num}. ${c.titulo}</span>
+          <span class="acordeon-flecha">▾</span>
+        </button>
+        <div class="acordeon-cuerpo">
+          <div class="kpi-selector" id="compSelector_${c.id}"></div>
+          <div class="kpis" id="compKpis_${c.id}"></div>
+          <div class="panel col-12" style="margin-top:8px">
+            <div class="serie-cab"><div>
+              <h3>Comportamiento Ingresos Urgencia — comparado</h3>
+              <p class="desc" id="compGraficoDesc_${c.id}"></p>
+            </div></div>
+            <div class="lienzo alto"><canvas id="ch_comp_${c.id}"></canvas></div>
+          </div>
+        </div>
+      </section>`).join('');
+
+  // toggle de cada sección de comparación
+  cont.querySelectorAll('.acordeon-cab[data-seccomp]').forEach(b=>{
+    b.addEventListener('click', ()=> b.closest('.acordeon').classList.toggle('abierta'));
+  });
+
+  COMPARACIONES.forEach(renderUnaComparacion);
+}
+
+function renderUnaComparacion(c){
+  const est = compEstado[c.id];
+  // meses disponibles considerando SOLO las dos sedes de esta comparación
+  const datosComp = DATOS.filter(x=>
+    (x.clinica===c.a.clinica && x.sede===c.a.sede) ||
+    (x.clinica===c.b.clinica && x.sede===c.b.sede));
+  const todosMeses = mesesOrdenados(datosComp);
+
+  // mes de referencia
+  let mesRef;
+  if(est.anio && est.mes) mesRef = `${est.anio}-${est.mes}`;
+  else if(est.anio){ const a=todosMeses.filter(m=>m.slice(0,4)===est.anio); mesRef=a.length?a[a.length-1]:null; }
+  else mesRef = todosMeses.length ? todosMeses[todosMeses.length-1] : null;
+  const idx = mesRef ? todosMeses.indexOf(mesRef) : -1;
+  const mesPrev = idx>0 ? todosMeses[idx-1] : null;
+  const etiqMes = mesRef ? nombreMes(mesRef) : 'sin datos';
+
+  // valor + variación de un lado (clínica+sede) para un filtro
+  const valorLado = (lado, filtroFn)=>{
+    const sub = DATOS.filter(x=>x.clinica===lado.clinica && x.sede===lado.sede).filter(filtroFn||(()=>true));
+    const act = mesRef ? sub.filter(x=>x.fecha.slice(0,7)===mesRef).length : 0;
+    const prev = mesPrev ? sub.filter(x=>x.fecha.slice(0,7)===mesPrev).length : 0;
+    let pct=null;
+    if(mesPrev && prev>0) pct=((act-prev)/prev)*100;
+    else if(mesPrev && prev===0 && act>0) pct=100;
+    return {actual:act, pct};
+  };
+
+  const tarjetasDef = [
+    {filtro:'todas', label:'Atenciones'},
+    {filtro:'soat', label:'SOAT', subs:[
+      {filtro:'soat_nuevas', label:'Nuevas'}, {filtro:'soat_recon', label:'Reconsultas'} ]},
+    {filtro:'otros', label:'OTROS', subs:[
+      {filtro:'otros_arl', label:'Clientes ARL'}, {filtro:'otros_ppp', label:'Clientes PPP'}, {filtro:'otros_poliza', label:'Pólizas Estudiantiles'} ]},
+  ];
+  const tarjetasHTML = tarjetasDef.map(t=>{
+    const card = tarjetaComp(`${t.label} · ${etiqMes}`, valorLado(c.a,COMP_FILTROS[t.filtro]), valorLado(c.b,COMP_FILTROS[t.filtro]), t.filtro, c);
+    if(t.subs){
+      const subs = t.subs.map(s=> subtarjetaComp(s.label, valorLado(c.a,COMP_FILTROS[s.filtro]), valorLado(c.b,COMP_FILTROS[s.filtro]), s.filtro, c)).join('');
+      return `<div class="kpi-bloque">${card}<div class="subkpi-grupo">${subs}</div></div>`;
+    }
+    return card;
+  }).join('');
+  document.getElementById('compKpis_'+c.id).innerHTML = tarjetasHTML;
+
+  // selector de periodo
+  pintarSelectorComp(c, todosMeses);
+
+  // clic en tarjetas -> filtra el gráfico de esta comparación
+  document.getElementById('compKpis_'+c.id).querySelectorAll('.clickable-kpi').forEach(el=>{
+    const f = el.dataset.kpifiltro;
+    if(est.kpiFiltro===f) el.classList.add('kpi-activa');
+    el.addEventListener('click', ()=>{
+      est.kpiFiltro = (est.kpiFiltro===f) ? 'todas' : f;
+      renderUnaComparacion(c);
+    });
+  });
+
+  dibujarTendenciaComparada(c, todosMeses);
+}
+
+// Tarjeta de comparación: lado A arriba, lado B abajo, diferencia
+function tarjetaComp(label, infoA, infoB, filtro, c){
+  const dif = infoA.actual - infoB.actual;
+  const difTxt = dif>0 ? `+${dif.toLocaleString('es-CO')}` : dif.toLocaleString('es-CO');
+  const difCls = dif>0 ? 'verde' : dif<0 ? 'rojo' : 'neutro';
+  return `
+    <div class="kpi comp-card clickable-kpi" data-kpifiltro="${filtro}">
+      <div class="label">${label}</div>
+      <div class="comp-linea">
+        <span class="comp-et"><span class="pt" style="background:${C[c.a.color]}"></span>${c.a.label}</span>
+        <span class="comp-val">${infoA.actual.toLocaleString('es-CO')}</span>
+        <span class="variacion mini ${semaforo(infoA.pct)}">${flecha(infoA.pct)} ${fmtPct(infoA.pct)}</span>
+      </div>
+      <div class="comp-linea">
+        <span class="comp-et"><span class="pt" style="background:${C[c.b.color]}"></span>${c.b.label}</span>
+        <span class="comp-val">${infoB.actual.toLocaleString('es-CO')}</span>
+        <span class="variacion mini ${semaforo(infoB.pct)}">${flecha(infoB.pct)} ${fmtPct(infoB.pct)}</span>
+      </div>
+      <div class="comp-dif ${difCls}">Diferencia: <strong>${difTxt}</strong></div>
+    </div>`;
+}
+
+// Subtarjeta de comparación (compacta)
+function subtarjetaComp(label, infoA, infoB, filtro, c){
+  const dif = infoA.actual - infoB.actual;
+  const difTxt = dif>0 ? `+${dif}` : String(dif);
+  const difCls = dif>0 ? 'verde' : dif<0 ? 'rojo' : 'neutro';
+  return `
+    <div class="subkpi comp-sub clickable-kpi" data-kpifiltro="${filtro}">
+      <div class="sub-label" title="${label}">${label}</div>
+      <div class="comp-sub-fila"><span class="pt" style="background:${C[c.a.color]}"></span><span class="comp-sub-val">${infoA.actual.toLocaleString('es-CO')}</span></div>
+      <div class="comp-sub-fila"><span class="pt" style="background:${C[c.b.color]}"></span><span class="comp-sub-val">${infoB.actual.toLocaleString('es-CO')}</span></div>
+      <div class="comp-sub-dif ${difCls}">${difTxt}</div>
+    </div>`;
+}
+
+// Selector de año/mes para una comparación
+function pintarSelectorComp(c, todosMeses){
+  const est = compEstado[c.id];
+  const cont = document.getElementById('compSelector_'+c.id);
+  if(!cont) return;
+  const anios = [...new Set(todosMeses.map(m=>m.slice(0,4)))].sort();
+  const mesesDisp = est.anio ? todosMeses.filter(m=>m.slice(0,4)===est.anio).map(m=>m.slice(5,7)) : [];
+  let html = '<div class="kpi-sel-grupo"><span class="kpi-sel-et">Periodo</span>';
+  html += `<button class="kbtn ${!est.anio?'on':''}" data-tipo="anio" data-val="">Último mes</button>`;
+  anios.forEach(a=> html += `<button class="kbtn ${est.anio===a?'on':''}" data-tipo="anio" data-val="${a}">${a}</button>`);
+  html += '</div>';
+  if(est.anio && mesesDisp.length){
+    html += '<div class="kpi-sel-grupo"><span class="kpi-sel-et">Mes</span>';
+    html += `<button class="kbtn ${!est.mes?'on':''}" data-tipo="mes" data-val="">Todos</button>`;
+    mesesDisp.forEach(m=> html += `<button class="kbtn ${est.mes===m?'on':''}" data-tipo="mes" data-val="${m}">${MESES_CORTO[parseInt(m)-1]}</button>`);
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+  cont.querySelectorAll('.kbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if(b.dataset.tipo==='anio'){ est.anio=b.dataset.val; est.mes=''; }
+      else est.mes=b.dataset.val;
+      renderUnaComparacion(c);
+    });
+  });
+}
+
+function dibujarTendenciaComparada(c, todosMeses){
+  const est = compEstado[c.id];
+  const meses = (todosMeses||mesesOrdenados(DATOS)).slice(-12);
+  const fFn = COMP_FILTROS[est.kpiFiltro] || COMP_FILTROS.todas;
+  const descEl = document.getElementById('compGraficoDesc_'+c.id);
+  if(descEl) descEl.textContent = `${COMP_ETIQUETAS[est.kpiFiltro]||''}: ${c.a.label} vs ${c.b.label} (últimos 12 meses).`;
+
+  const datLado = lado => meses.map(k => DATOS.filter(x=>x.clinica===lado.clinica && x.sede===lado.sede && x.fecha.slice(0,7)===k).filter(fFn).length);
+  const datasets = [
+    {label:c.a.label, data:datLado(c.a), borderColor:C[c.a.color], backgroundColor:'transparent', tension:.3, borderWidth:2.6, pointRadius:2, pointHoverRadius:5},
+    {label:c.b.label, data:datLado(c.b), borderColor:C[c.b.color], backgroundColor:'transparent', tension:.3, borderWidth:2.6, pointRadius:2, pointHoverRadius:5},
+  ];
+
+  const cid = 'ch_comp_'+c.id;
+  destruir(cid);
+  charts[cid] = new Chart(document.getElementById(cid),{
+    type:'line',
+    data:{ labels:meses.map(k=>{const[y,mm]=k.split('-');return `${MESES[parseInt(mm)-1]} ${y.slice(2)}`;}), datasets },
+    plugins:[ChartDataLabels],
+    options:{ responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top:18 } },
+      plugins:{
+        legend:{position:'bottom',labels:{usePointStyle:true,padding:12,boxWidth:8}},
+        datalabels:{ align:'top', anchor:'end', offset:4, color:'#33475B', font:{size:10,weight:'600'},
+          display:(ctx)=> ctx.dataset.data[ctx.dataIndex] > 0,
+          formatter:v=> v.toLocaleString('es-CO') }
+      },
+      scales:{ y:{beginAtZero:true,grid:{color:'#EEF1F5'}}, x:{grid:{display:false}} }
+    }
+  });
+}
+
+/* ============================================================================
+   9. EVENTOS DE INTERFAZ
+============================================================================ */
+function toast(msg, tipo=''){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = tipo; t.style.display='block';
+  setTimeout(()=>{ t.style.display='none'; }, 3800);
+}
+function actualizarProgreso(pct, txt){
+  document.getElementById('rellenoProg').style.width = pct+'%';
+  if(txt) document.getElementById('txtProg').textContent = txt;
+}
+
+// Modal importación
+const modal = document.getElementById('modalImport');
+function abrirModal(){ modal.classList.remove('hidden'); }
+function cerrarModal(){
+  modal.classList.add('hidden');
+  document.getElementById('progreso').style.display='none';
+  actualizarProgreso(0);
+}
+document.getElementById('btnAbrirImport').addEventListener('click', abrirModal);
+document.getElementById('btnImportVacio').addEventListener('click', abrirModal);
+document.getElementById('btnCerrarModal').addEventListener('click', cerrarModal);
+
+const zona = document.getElementById('zonaSoltar');
+const inputArchivo = document.getElementById('inputArchivo');
+zona.addEventListener('click', ()=>inputArchivo.click());
+zona.addEventListener('dragover', e=>{e.preventDefault();zona.classList.add('activa');});
+zona.addEventListener('dragleave', ()=>zona.classList.remove('activa'));
+zona.addEventListener('drop', e=>{
+  e.preventDefault(); zona.classList.remove('activa');
+  if(e.dataTransfer.files.length) manejarArchivo(e.dataTransfer.files[0]);
+});
+inputArchivo.addEventListener('change', e=>{
+  if(e.target.files.length) manejarArchivo(e.target.files[0]);
+});
+
+async function manejarArchivo(archivo){
+  if(!/\.xlsx?$/i.test(archivo.name)){ toast('El archivo debe ser .xlsx','err'); return; }
+  document.getElementById('progreso').style.display='block';
+  actualizarProgreso(8,'Leyendo archivo…');
+  try{
+    const buf = await archivo.arrayBuffer();
+    actualizarProgreso(20,'Procesando hojas…');
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const nuevos = procesarLibro(wb, archivo.name);
+    if(!nuevos.length){ toast('No se encontraron registros con fecha válida','err'); cerrarModal(); return; }
+    actualizarProgreso(40, SUPABASE_ACTIVO?'Guardando en Supabase…':'Cargando en memoria…');
+    await guardarEnSupabase(nuevos);
+    DATOS = DATOS.concat(nuevos);
+    actualizarProgreso(100,'¡Listo!');
+    const clinicaDet = [...new Set(nuevos.map(n=>n.clinica))].join(', ');
+    setTimeout(()=>{
+      cerrarModal();
+      cambiarVista();
+      toast(`${nuevos.length.toLocaleString('es-CO')} atenciones importadas (${clinicaDet})`,'ok');
+    }, 600);
+  }catch(err){
+    console.error(err);
+    toast('Error al importar: '+(err.message||err),'err');
+    cerrarModal();
+  }
+}
+
+/* ============================================================================
+   10. AUTENTICACIÓN
+============================================================================ */
+function mostrarApp(correo){
+  usuarioCorreo = correo;
+  document.getElementById('vistaLogin').classList.add('hidden');
+  document.getElementById('vistaApp').classList.remove('hidden');
+  document.getElementById('usuarioActivo').textContent = correo;
+  if(!SUPABASE_ACTIVO) document.getElementById('bannerConfig').classList.remove('hidden');
+  enlazarNavegacion();   // barra lateral
+  iniciarDatos();
+}
+async function iniciarDatos(){
+  if(SUPABASE_ACTIVO){
+    try{
+      const guardados = await cargarDesdeSupabase();
+      DATOS = guardados;
+    }catch(err){ console.warn('No se pudo leer Supabase:', err.message); }
+  }
+  cambiarVista();
+}
+
+document.getElementById('btnEntrar').addEventListener('click', login);
+document.getElementById('clave').addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
+
+async function login(){
+  const correo = document.getElementById('correo').value.trim();
+  const clave  = document.getElementById('clave').value;
+  const msg = document.getElementById('msgLogin');
+  msg.className='mensaje';
+  if(!correo || !clave){ msg.className='mensaje error'; msg.textContent='Ingresa correo y contraseña.'; return; }
+
+  const btn = document.getElementById('btnEntrar');
+  btn.disabled=true; btn.textContent='Verificando…';
+
+  if(SUPABASE_ACTIVO){
+    const { data, error } = await sb.auth.signInWithPassword({email:correo, password:clave});
+    btn.disabled=false; btn.textContent='Iniciar sesión';
+    if(error){ msg.className='mensaje error'; msg.textContent='Credenciales incorrectas o usuario no autorizado.'; return; }
+    mostrarApp(data.user.email);
+  }else{
+    // MODO LOCAL (sin Supabase configurado): acceso de demostración
+    btn.disabled=false; btn.textContent='Iniciar sesión';
+    msg.className='mensaje ok';
+    msg.textContent='Modo local activo (Supabase no configurado). Entrando…';
+    setTimeout(()=>mostrarApp(correo), 500);
+  }
+}
+
+document.getElementById('btnSalir').addEventListener('click', async ()=>{
+  if(SUPABASE_ACTIVO){ await sb.auth.signOut(); }
+  location.reload();
+});
+
+// Sesión persistente
+(async function(){
+  if(SUPABASE_ACTIVO){
+    const { data } = await sb.auth.getSession();
+    if(data.session){ mostrarApp(data.session.user.email); }
+  }
+})();
+</script>
+
+<!--
+================================================================================
+  SCRIPT SQL PARA SUPABASE  (pégalo en: Supabase → SQL Editor → New query)
+================================================================================
+
+-- 1) Tabla de atenciones de urgencias
+create table if not exists public.atenciones_urgencias (
+  id           bigint generated always as identity primary key,
+  clinica      text,
+  sede         text,
+  no_admision  text,
+  fecha        date,
+  hora         smallint,
+  medico       text,
+  documento    text,        -- dato sensible
+  paciente     text,        -- dato sensible
+  medio        text,
+  aseguradora  text,
+  tipo         text,
+  municipio    text,
+  creado_en    timestamptz default now()
+);
+
+-- Índices para acelerar los filtros del panel
+create index if not exists idx_au_fecha   on public.atenciones_urgencias (fecha);
+create index if not exists idx_au_clinica on public.atenciones_urgencias (clinica);
+create index if not exists idx_au_sede    on public.atenciones_urgencias (sede);
+
+-- 2) Activar Row Level Security
+alter table public.atenciones_urgencias enable row level security;
+
+-- 3) Políticas: solo usuarios autenticados pueden leer e insertar
+create policy "leer_autenticados"
+  on public.atenciones_urgencias for select
+  to authenticated using (true);
+
+create policy "insertar_autenticados"
+  on public.atenciones_urgencias for insert
+  to authenticated with check (true);
+
+-- (Opcional) permitir borrar solo a autenticados
+-- create policy "borrar_autenticados"
+--   on public.atenciones_urgencias for delete
+--   to authenticated using (true);
+
+================================================================================
+  CREAR USUARIOS:
+  Supabase → Authentication → Users → "Add user" (correo + contraseña).
+  Desactiva el registro público en Authentication → Providers → Email
+  ("Allow new users to sign up" = OFF) para que solo entren los usuarios
+  que tú crees manualmente.
+================================================================================
+-->
+</body>
+</html>
+<!--
+  ============================================================================
+  DASHBOARD DE URGENCIAS — DOLORMED / REDESIMAT
+  ----------------------------------------------------------------------------
+  App autónoma de un solo archivo. Funciona abriéndola en el navegador.
+  - Login mediante Supabase Auth (correo + contraseña)
+  - Importación de Excel (.xlsx) a Supabase con normalización automática
+  - 6 vistas agregadas: volumen/tendencia, productividad médica, SOAT vs OTROS,
+    aseguradoras, picos por hora + medio de ingreso, procedencia (municipio),
+    y comparativa Dolormed vs RedesImat.
+  - Los paneles NUNCA muestran nombre ni documento de pacientes (solo agregados).
+
+  >>> PARA CONECTAR SUPABASE: edita SUPABASE_URL y SUPABASE_ANON_KEY abajo.
+  >>> El script SQL para crear la tabla está documentado al final de este archivo.
+  ============================================================================
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Urgencias · Dolormed / RedesImat</title>
+
+<!-- Librerías desde CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+:root{
+  /* ---- Identidad DOLORMED ---- */
+  --azul:        #2A4161;   /* azul marino principal */
+  --azul-claro:  #3C5A82;
+  --verde:       #9ECB3B;   /* verde lima */
+  --verde-claro: #CCDB28;
+  --gris:        #56595E;
+  /* ---- RedesImat (para comparativa) ---- */
+  --redes:       #2B5699;
+  --redes-claro: #5B9FD5;
+  /* ---- Neutros ---- */
+  --bg:          #F4F6F8;
+  --panel:       #FFFFFF;
+  --linea:       #E3E8EE;
+  --texto:       #1F2A38;
+  --texto-suave: #6B7785;
+  --soat:        #2A4161;
+  --otros:       #9ECB3B;
+  --sombra: 0 1px 3px rgba(16,32,55,.08), 0 4px 16px rgba(16,32,55,.05);
+  --radio: 14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg); color:var(--texto); line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-weight:700; letter-spacing:-.01em}
+button{font-family:inherit; cursor:pointer; border:none}
+.hidden{display:none !important}
+
+/* ====================== LOGIN ====================== */
+#vistaLogin{
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--azul) 0%, #1B2C44 100%);
+  padding:24px;
+}
+.login-card{
+  background:var(--panel); border-radius:20px; padding:40px 36px;
+  width:100%; max-width:400px; box-shadow:0 20px 60px rgba(0,0,0,.3);
+  text-align:center;
+}
+.login-logo{
+  width:64px;height:64px;border-radius:18px;margin:0 auto 18px;
+  background:var(--azul); position:relative; overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+.login-logo .h1{width:22px;height:30px;background:var(--verde);border-radius:14px 14px 4px 14px;transform:rotate(-12px);position:absolute;left:14px}
+.login-logo .h2{width:22px;height:30px;background:#fff;border-radius:14px 14px 14px 4px;transform:rotate(12px);position:absolute;right:14px;opacity:.92}
+.login-card h1{font-size:1.4rem;color:var(--azul)}
+.login-card .sub{color:var(--texto-suave);font-size:.86rem;margin:6px 0 26px}
+.campo{text-align:left;margin-bottom:14px}
+.campo label{display:block;font-size:.78rem;font-weight:600;color:var(--gris);margin-bottom:6px}
+.campo input{
+  width:100%;padding:12px 14px;border:1.5px solid var(--linea);border-radius:10px;
+  font-size:.95rem;transition:border-color .15s;
+}
+.campo input:focus{outline:none;border-color:var(--verde)}
+.btn-primario{
+  width:100%;background:var(--azul);color:#fff;padding:13px;border-radius:10px;
+  font-size:.95rem;font-weight:600;margin-top:6px;transition:background .15s;
+}
+.btn-primario:hover{background:var(--azul-claro)}
+.btn-primario:disabled{opacity:.55;cursor:not-allowed}
+.login-aviso{
+  margin-top:20px;font-size:.72rem;color:var(--texto-suave);
+  background:var(--bg);border-radius:8px;padding:10px 12px;line-height:1.4;
+}
+.mensaje{font-size:.82rem;margin-top:14px;padding:10px;border-radius:8px;display:none}
+.mensaje.error{background:#FDECEC;color:#B3261E;display:block}
+.mensaje.ok{background:#EAF6E1;color:#3E6B12;display:block}
+
+/* ====================== APP ====================== */
+#vistaApp{min-height:100vh;display:flex;flex-direction:column}
+.topbar{
+  background:var(--azul);color:#fff;padding:0 24px;height:60px;
+  display:flex;align-items:center;gap:16px;box-shadow:var(--sombra);
+  position:sticky;top:0;z-index:50;
+}
+.marca{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem}
+.marca .punto{width:10px;height:10px;border-radius:50%;background:var(--verde)}
+.topbar .sep{flex:1}
+.topbar .usuario{font-size:.82rem;opacity:.85}
+.btn-menu{
+  background:rgba(255,255,255,.12);color:#fff;width:34px;height:34px;border-radius:8px;
+  font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .15s;
+}
+.btn-menu:hover{background:rgba(255,255,255,.22)}
+.btn-import-top{
+  background:var(--verde);color:var(--azul);padding:8px 14px;border-radius:8px;
+  font-weight:700;font-size:.82rem;transition:filter .15s;
+}
+.btn-import-top:hover{filter:brightness(.95)}
+.btn-salir{
+  background:rgba(255,255,255,.12);color:#fff;padding:8px 14px;border-radius:8px;
+  font-size:.82rem;font-weight:600;transition:background .15s;
+}
+.btn-salir:hover{background:rgba(255,255,255,.22)}
+
+/* ---- Layout con barra lateral ---- */
+.layout{display:flex;flex:1;min-height:0}
+.sidebar{
+  width:230px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--linea);
+  padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow-y:auto;
+}
+.nav-item{
+  width:100%;text-align:left;background:none;border:none;color:var(--texto);
+  padding:10px 12px;border-radius:9px;font-size:.9rem;font-weight:600;
+  display:flex;align-items:center;gap:9px;transition:all .13s;cursor:pointer;
+}
+.nav-item:hover{background:var(--bg)}
+.nav-item.activo{background:var(--azul);color:#fff}
+.nav-ic{font-size:.95rem;opacity:.85}
+.nav-general{margin-bottom:6px}
+.nav-modulo{margin-top:4px}
+.nav-grupo{
+  width:100%;text-align:left;background:none;border:none;color:var(--gris);
+  padding:9px 12px;font-size:.74rem;font-weight:800;text-transform:uppercase;
+  letter-spacing:.04em;display:flex;align-items:center;gap:8px;cursor:default;
+}
+.nav-punto{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.nav-punto.verde{background:var(--verde)}
+.nav-punto.azul{background:var(--redes)}
+.nav-subs{display:flex;flex-direction:column;gap:2px;padding-left:8px}
+.nav-sub{font-size:.86rem;font-weight:500;padding-left:22px}
+.nav-sub.activo{background:var(--azul);color:#fff;font-weight:600}
+.nav-comp{margin-top:12px;border-top:1px solid var(--linea);padding-top:14px;border-radius:0 0 9px 9px}
+.nav-comp.activo{border-radius:9px}
+
+.sidebar.oculta{display:none}
+
+.contenido{flex:1;min-width:0;padding:24px;overflow-x:hidden}
+
+/* ---- Encabezado de vista ---- */
+.vista-cab{margin-bottom:18px}
+.vista-cab h2{font-size:1.4rem;color:var(--azul)}
+.vista-cab p{color:var(--texto-suave);font-size:.88rem;margin-top:2px}
+
+/* ---- Tarjetas KPI ---- */
+.kpi-selector{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;align-items:center}
+/* ---- Tarjetas de comparación (Dolormed vs RedesImat) ---- */
+.comp-card{display:flex;flex-direction:column;gap:6px;justify-content:flex-start}
+.comp-linea{display:flex;align-items:center;gap:8px;font-size:.9rem}
+.comp-linea .comp-et{display:flex;align-items:center;gap:5px;font-size:.72rem;font-weight:700;color:var(--texto-suave);min-width:78px}
+.comp-linea .comp-et .pt{width:9px;height:9px;border-radius:50%;display:inline-block}
+.comp-linea .comp-val{font-size:1.3rem;font-weight:800;color:var(--azul);margin-left:auto;font-variant-numeric:tabular-nums}
+.comp-linea .variacion.mini{margin-left:0}
+.comp-dif{font-size:.74rem;color:var(--texto-suave);border-top:1px solid var(--linea);padding-top:6px;margin-top:2px}
+.comp-dif strong{font-size:.9rem}
+.comp-dif.verde strong{color:#2E7D22}.comp-dif.rojo strong{color:#B3261E}.comp-dif.neutro strong{color:var(--gris)}
+/* subtarjetas de comparación */
+.comp-sub{gap:2px}
+.comp-sub-fila{display:flex;align-items:center;gap:5px}
+.comp-sub-fila .pt{width:8px;height:8px;border-radius:50%;display:inline-block}
+.comp-sub-val{font-size:1rem;font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
+.comp-sub-dif{font-size:.66rem;font-weight:700;margin-top:2px;padding-top:3px;border-top:1px solid var(--linea)}
+.comp-sub-dif.verde{color:#2E7D22}.comp-sub-dif.rojo{color:#B3261E}.comp-sub-dif.neutro{color:var(--gris)}
+/* Tarjetas clicables (vinculadas a la gráfica de tendencia) */
+.clickable-kpi{cursor:pointer;transition:transform .1s,box-shadow .15s,outline .1s}
+.clickable-kpi:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(42,65,97,.14)}
+.clickable-kpi.kpi-activa{outline:2.5px solid var(--verde);outline-offset:1px}
+/* Contador de meses hacia atrás */
+.contador-meses{display:flex;align-items:center;gap:5px}
+.contador-meses.atenuado{opacity:.4}
+.cm-btn{width:26px;height:26px;border:1.4px solid var(--linea);background:#fff;color:var(--azul);border-radius:7px;font-size:1rem;font-weight:700;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
+.cm-btn:hover{border-color:var(--verde);background:var(--bg)}
+.cm-input{width:52px;height:26px;border:1.4px solid var(--linea);border-radius:7px;text-align:center;font-size:.85rem;font-weight:700;color:var(--azul)}
+.cm-input:focus{outline:none;border-color:var(--verde)}
+/* Bloque de tarjeta principal + subtarjetas apiladas a su derecha */
+.kpi-bloque{display:flex;gap:12px;align-items:stretch;grid-column:span 2}
+.kpi-bloque > .kpi{flex:1;min-width:150px}
+.subkpi-grupo{display:flex;flex-direction:column;gap:8px;flex-shrink:0;width:150px}
+.subkpi{background:var(--panel);border-radius:10px;box-shadow:var(--sombra);padding:8px 11px;border-left:4px solid var(--verde);display:flex;flex-direction:column;justify-content:center;gap:3px;flex:1;min-height:0;overflow:hidden}
+.subkpi.sem-verde{border-left-color:#3E9B2E}
+.subkpi.sem-amarillo{border-left-color:#E0A800}
+.subkpi.sem-rojo{border-left-color:#D14334}
+.subkpi.sem-neutro{border-left-color:var(--gris)}
+.subkpi .sub-label{font-size:.62rem;color:var(--texto-suave);font-weight:700;text-transform:uppercase;letter-spacing:.02em;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.subkpi .sub-fila{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.subkpi .sub-valor{font-size:1.15rem;font-weight:700;color:var(--azul);line-height:1}
+.variacion.mini{font-size:.62rem;padding:1px 5px;white-space:nowrap;border-radius:10px;font-weight:700}
+.variacion.mini.verde{background:#E7F4E4;color:#2E7D22}
+.variacion.mini.amarillo{background:#FBF2D4;color:#9A7400}
+.variacion.mini.rojo{background:#FBE4E1;color:#B3261E}
+.variacion.mini.neutro{background:var(--bg);color:var(--gris)}
+@media(max-width:1100px){.kpi-bloque{grid-column:span 1;flex-direction:column}.subkpi-grupo{width:100%;flex-direction:row;flex-wrap:wrap}.subkpi{flex:1 1 30%}}
+.kpi-sel-grupo{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.kpi-sel-et{font-size:.7rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
+.kbtn{background:#fff;border:1.4px solid var(--linea);color:var(--gris);padding:5px 12px;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;transition:all .13s}
+.kbtn:hover{border-color:var(--verde);color:var(--azul)}
+.kbtn.on{background:var(--azul);border-color:var(--azul);color:#fff}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-bottom:24px}
+.kpi{
+  background:var(--panel);border-radius:var(--radio);box-shadow:var(--sombra);
+  padding:18px 20px;border-left:5px solid var(--verde);position:relative;
+}
+.kpi.sem-verde{border-left-color:#3E9B2E}
+.kpi.sem-amarillo{border-left-color:#E0A800}
+.kpi.sem-rojo{border-left-color:#D14334}
+.kpi.sem-neutro{border-left-color:var(--gris)}
+.kpi .label{font-size:.74rem;color:var(--texto-suave);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.kpi .fila-valor{display:flex;align-items:baseline;gap:10px;margin-top:5px;flex-wrap:wrap}
+.kpi .valor{font-size:1.85rem;font-weight:700;color:var(--azul);line-height:1}
+.kpi .variacion{
+  font-size:.82rem;font-weight:700;padding:2px 8px;border-radius:20px;
+  display:inline-flex;align-items:center;gap:3px;
+}
+.kpi .variacion.verde{background:#E7F4E4;color:#2E7D22}
+.kpi .variacion.amarillo{background:#FBF2D4;color:#9A7400}
+.kpi .variacion.rojo{background:#FBE4E1;color:#B3261E}
+.kpi .variacion.neutro{background:var(--bg);color:var(--gris)}
+.kpi .extra{font-size:.74rem;color:var(--texto-suave);margin-top:7px}
+.kpi .semaforo{
+  position:absolute;top:16px;right:16px;width:12px;height:12px;border-radius:50%;
+}
+.kpi .semaforo.verde{background:#3E9B2E;box-shadow:0 0 0 3px #E7F4E4}
+.kpi .semaforo.amarillo{background:#E0A800;box-shadow:0 0 0 3px #FBF2D4}
+.kpi .semaforo.rojo{background:#D14334;box-shadow:0 0 0 3px #FBE4E1}
+.kpi .semaforo.neutro{background:var(--gris);box-shadow:0 0 0 3px var(--bg)}
+
+/* ---- Rejilla de paneles ---- */
+/* ---- Secciones colapsables (acordeón) ---- */
+.acordeon{background:transparent;margin-bottom:18px;border-radius:14px}
+.acordeon-cab{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--azul);color:#fff;border:none;border-radius:12px;padding:14px 20px;cursor:pointer;transition:background .15s;text-align:left}
+.acordeon-cab:hover{background:var(--azul-claro)}
+.acordeon-tit{font-size:1.02rem;font-weight:700;letter-spacing:.01em}
+.acordeon-flecha{font-size:1rem;transition:transform .2s;flex-shrink:0}
+.acordeon.abierta .acordeon-flecha{transform:rotate(180deg)}
+.acordeon-cuerpo{overflow:hidden;padding:0 2px;max-height:0;opacity:0;transition:max-height .35s ease, opacity .25s, padding .25s}
+.acordeon.abierta .acordeon-cuerpo{max-height:20000px;opacity:1;padding:18px 2px 4px}
+.rejilla{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+.panel{
+  background:var(--panel);border-radius:var(--radio);box-shadow:var(--sombra);
+  padding:18px 20px;display:flex;flex-direction:column;
+}
+.col-12{grid-column:span 12}
+.col-8{grid-column:span 8}
+.col-6{grid-column:span 6}
+.col-4{grid-column:span 4}
+.panel h3{font-size:.98rem;color:var(--azul);margin-bottom:2px}
+.panel .desc{font-size:.76rem;color:var(--texto-suave);margin-bottom:12px}
+
+/* ---- Controles por panel ---- */
+.panel-controles{
+  display:flex;flex-wrap:wrap;gap:14px;margin-bottom:14px;
+  padding-bottom:12px;border-bottom:1px solid var(--linea);
+}
+.ctrl-grupo{display:flex;align-items:center;gap:6px}
+.ctrl-grupo .et{font-size:.66rem;font-weight:700;color:var(--texto-suave);text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
+.cbtn{
+  background:#fff;border:1.4px solid var(--linea);color:var(--gris);
+  padding:5px 11px;border-radius:7px;font-size:.78rem;font-weight:600;
+  transition:all .13s;white-space:nowrap;cursor:pointer;
+}
+.cbtn:hover{border-color:var(--verde);color:var(--azul)}
+.cbtn.on{background:var(--azul);border-color:var(--azul);color:#fff}
+/* grupos de filtro multi-selección: permiten envolver muchos botones */
+.ctrl-multi{flex-wrap:wrap;max-width:100%}
+.ctrl-multi .cbtn{padding:4px 9px;font-size:.74rem}
+.ctrl-multi .cbtn.on{background:var(--verde);border-color:var(--verde);color:var(--azul)}
+
+/* ---- Cuerpo: gráfico + tabla al lado ---- */
+.panel-cuerpo{display:grid;grid-template-columns:1fr 230px;gap:16px;flex:1;min-height:0}
+.panel-cuerpo.solo-grafico{grid-template-columns:1fr}
+.lienzo{position:relative;min-height:280px;width:100%}
+.lienzo.alto{min-height:340px}
+
+/* ---- Tabla de validación lateral ---- */
+.tabla-val{
+  border:1px solid var(--linea);border-radius:10px;overflow:hidden;
+  display:flex;flex-direction:column;max-height:380px;
+}
+.tabla-val .cab{
+  background:var(--bg);padding:8px 11px;font-size:.68rem;font-weight:700;
+  color:var(--texto-suave);text-transform:uppercase;letter-spacing:.03em;
+  border-bottom:1px solid var(--linea);display:flex;justify-content:space-between;align-items:center;
+}
+.tabla-val .cab .total{color:var(--azul);font-size:.74rem}
+.tabla-val .cuerpo{overflow-y:auto;flex:1}
+.tabla-val table{width:100%;border-collapse:collapse;font-size:.78rem}
+.tabla-val td{padding:6px 11px;border-bottom:1px solid #F0F3F6}
+.tabla-val td.etq{color:var(--texto);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabla-val td.val{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--azul)}
+.tabla-val td.pct{text-align:right;font-size:.7rem;color:var(--texto-suave);width:42px}
+.tabla-val td.pct-var{text-align:right;width:78px;white-space:nowrap}
+.vchip{font-size:.68rem;font-weight:700;padding:1px 5px;border-radius:10px;display:inline-block}
+.vchip.verde{background:#E7F4E4;color:#2E7D22}
+.vchip.rojo{background:#FBE4E1;color:#B3261E}
+.vchip.neutro{background:var(--bg);color:var(--texto-suave)}
+.tabla-val tr:last-child td{border-bottom:none}
+.tabla-val tr:hover td{background:var(--bg)}
+.tabla-val .vacio{padding:20px;text-align:center;color:var(--texto-suave);font-size:.78rem}
+.btn-csv{
+  background:none;border:none;color:var(--redes);font-size:.68rem;font-weight:700;
+  cursor:pointer;text-transform:uppercase;letter-spacing:.03em;
+}
+.btn-csv:hover{text-decoration:underline}
+
+/* ---- Tabla (genérica, por si se usa) ---- */
+.tabla{width:100%;border-collapse:collapse;font-size:.84rem}
+.tabla th{
+  text-align:left;padding:8px 10px;color:var(--texto-suave);font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.03em;border-bottom:2px solid var(--linea);
+}
+.tabla td{padding:9px 10px;border-bottom:1px solid var(--linea)}
+.tabla td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.tabla tr:hover td{background:var(--bg)}
+
+/* ---- Estado vacío ---- */
+#estadoVacio{
+  background:var(--panel);border-radius:var(--radio);box-shadow:var(--sombra);
+  padding:60px 30px;text-align:center;
+}
+#estadoVacio .icono{font-size:2.6rem;margin-bottom:12px}
+#estadoVacio h2{color:var(--azul);font-size:1.3rem;margin-bottom:8px}
+#estadoVacio p{color:var(--texto-suave);max-width:440px;margin:0 auto 22px;font-size:.92rem}
+
+/* ---- Modal importación ---- */
+.modal-fondo{
+  position:fixed;inset:0;background:rgba(16,28,48,.55);display:flex;
+  align-items:center;justify-content:center;z-index:100;padding:20px;
+}
+.modal{
+  background:#fff;border-radius:18px;max-width:520px;width:100%;padding:28px;
+  box-shadow:0 24px 70px rgba(0,0,0,.35);
+}
+.modal h2{color:var(--azul);font-size:1.25rem;margin-bottom:6px}
+.modal p{color:var(--texto-suave);font-size:.86rem;margin-bottom:18px}
+.zona-soltar{
+  border:2px dashed var(--linea);border-radius:12px;padding:34px 20px;text-align:center;
+  transition:border-color .15s,background .15s;cursor:pointer;margin-bottom:16px;
+}
+.zona-soltar:hover,.zona-soltar.activa{border-color:var(--verde);background:#FAFCF5}
+.zona-soltar .ic{font-size:2rem;margin-bottom:8px}
+.zona-soltar .t{font-weight:600;color:var(--azul);font-size:.95rem}
+.zona-soltar .s{font-size:.78rem;color:var(--texto-suave);margin-top:4px}
+.progreso{display:none;margin:14px 0}
+.progreso .pista{height:8px;background:var(--linea);border-radius:4px;overflow:hidden}
+.progreso .relleno{height:100%;background:var(--verde);width:0%;transition:width .3s}
+.progreso .txt{font-size:.78rem;color:var(--texto-suave);margin-top:7px;text-align:center}
+.modal-botones{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.btn-sec{background:#fff;border:1.5px solid var(--linea);color:var(--gris);padding:10px 18px;border-radius:9px;font-weight:600;font-size:.86rem}
+.aviso-legal{
+  background:#FFF8E6;border:1px solid #F2E2B6;border-radius:9px;padding:11px 13px;
+  font-size:.74rem;color:#8A6D1A;line-height:1.45;margin-bottom:16px;
+}
+
+/* ---- Toast ---- */
+#toast{
+  position:fixed;bottom:24px;right:24px;background:var(--azul);color:#fff;
+  padding:14px 20px;border-radius:10px;font-size:.88rem;box-shadow:0 10px 30px rgba(0,0,0,.25);
+  z-index:200;display:none;max-width:340px;
+}
+#toast.ok{background:#3E6B12}
+#toast.err{background:#B3261E}
+
+/* ---- Banner config ---- */
+#bannerConfig{
+  background:#FFF8E6;border-bottom:1px solid #F2E2B6;color:#8A6D1A;
+  padding:9px 24px;font-size:.8rem;text-align:center;
+}
+
+/* ---- Vista de comparación ---- */
+.comp-seccion{margin-bottom:26px}
+.comp-seccion h3{font-size:1.05rem;color:var(--azul);margin-bottom:4px}
+.comp-seccion .desc{font-size:.8rem;color:var(--texto-suave);margin-bottom:14px}
+.comp-tabla-wrap{background:var(--panel);border-radius:var(--radio);box-shadow:var(--sombra);padding:18px 20px;overflow-x:auto}
+.comp-tabla{width:100%;border-collapse:collapse;font-size:.86rem;min-width:560px}
+.comp-tabla th{
+  text-align:right;padding:10px 12px;font-size:.72rem;color:var(--texto-suave);
+  text-transform:uppercase;letter-spacing:.03em;border-bottom:2px solid var(--linea);
+}
+.comp-tabla th:first-child{text-align:left}
+.comp-tabla td{padding:11px 12px;border-bottom:1px solid var(--linea);text-align:right;font-variant-numeric:tabular-nums}
+.comp-tabla td:first-child{text-align:left;font-weight:600;color:var(--texto)}
+.comp-tabla td.dato{font-weight:700;color:var(--azul)}
+.comp-tabla tr:hover td{background:var(--bg)}
+.comp-tabla .badge-clinica{display:inline-flex;align-items:center;gap:7px}
+.comp-tabla .pt{width:9px;height:9px;border-radius:50%;display:inline-block}
+.comp-tabla tr.fila-clinica td{background:#F8FAFB;font-weight:700}
+.comp-grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:900px){.comp-grid2{grid-template-columns:1fr}}
+.var-chip{font-size:.78rem;font-weight:700;padding:2px 7px;border-radius:14px}
+.var-chip.verde{background:#E7F4E4;color:#2E7D22}
+.var-chip.amarillo{background:#FBF2D4;color:#9A7400}
+.var-chip.rojo{background:#FBE4E1;color:#B3261E}
+.var-chip.neutro{background:var(--bg);color:var(--gris)}
+
+/* ---- Encabezado de panel serie con indicador de filtro ---- */
+.serie-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:2px}
+.filtro-medio{display:inline-flex;align-items:center;gap:8px;background:#EAF0F5;border:1px solid var(--linea);border-radius:20px;padding:4px 6px 4px 12px;font-size:.78rem;color:var(--azul);font-weight:600;flex-shrink:0}
+.filtro-medio .fm-todos{background:var(--azul);color:#fff;border:none;border-radius:16px;padding:3px 10px;font-size:.72rem;font-weight:700;cursor:pointer}
+.filtro-medio .fm-todos:hover{background:var(--azul-claro)}
+.anio-ind{display:inline-flex;align-items:center;background:var(--verde);color:var(--azul);border-radius:16px;padding:4px 12px;font-size:.76rem;font-weight:700;flex-shrink:0;margin-left:8px}
+/* ---- Mapa coroplético ---- */
+.mapa-cuerpo{display:grid;grid-template-columns:1fr 260px;gap:18px;align-items:start}
+@media(max-width:1000px){.mapa-cuerpo{grid-template-columns:1fr}}
+.mapa-svg{background:#F8FAFB;border:1px solid var(--linea);border-radius:12px;padding:10px}
+.mapa-svg .mun-path{transition:fill .15s,stroke .15s;cursor:pointer}
+.mapa-svg .mun-path:hover{stroke:var(--verde);stroke-width:2}
+.mapa-lateral{display:flex;flex-direction:column;gap:14px}
+.mapa-leyenda{background:#F8FAFB;border:1px solid var(--linea);border-radius:10px;padding:12px}
+.leyenda-tit{font-size:.78rem;font-weight:700;color:var(--azul);margin-bottom:8px;line-height:1.3}
+.grad-barra{height:14px;border-radius:7px;background:linear-gradient(90deg,#CEDB28,#2A4161)}
+.grad-labels{display:flex;justify-content:space-between;font-size:.72rem;color:var(--texto-suave);margin-top:4px;font-weight:600}
+.mapa-rank{border:1px solid var(--linea);border-radius:10px;overflow:hidden;max-height:420px;display:flex;flex-direction:column}
+.rank-tit{background:var(--bg);padding:8px 12px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--texto-suave);border-bottom:1px solid var(--linea)}
+.mapa-rank{overflow-y:auto}
+.rank-fila{display:grid;grid-template-columns:1fr auto 42px;gap:8px;padding:6px 12px;font-size:.8rem;border-bottom:1px solid #F0F3F6;align-items:center}
+.rank-fila .rk-n{color:var(--texto);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank-fila .rk-v{font-weight:700;color:var(--azul);font-variant-numeric:tabular-nums}
+.rank-fila .rk-p{text-align:right;font-size:.72rem;color:var(--texto-suave)}
+.rank-fila:hover{background:var(--bg)}
+.rank-fila.otros .rk-n{font-style:italic;color:var(--texto-suave)}
+.rank-fila.total{background:var(--verde);font-weight:800}
+.rank-fila.total .rk-n,.rank-fila.total .rk-v,.rank-fila.total .rk-p{color:var(--azul);font-weight:800}
+/* celdas de medio clicables en la matriz */
+table.matriz td.medio.clickable{cursor:pointer;transition:background .12s}
+table.matriz td.medio.clickable:hover{background:#E3EEF7;text-decoration:underline}
+table.matriz td.medio.fila-sel{background:var(--verde);color:var(--azul);font-weight:800}
+table.matriz tbody tr:hover td.medio.fila-sel{background:var(--verde)}
+
+/* ---- Tabla matriz (Clientes Alto Valor detalle) ---- */
+.matriz-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.matriz-wrap{overflow-x:auto;border:1px solid var(--linea);border-radius:10px}
+table.matriz{border-collapse:collapse;font-size:.78rem;width:100%;min-width:760px}
+table.matriz th,table.matriz td{padding:6px 9px;text-align:center;border-bottom:1px solid #EEF1F5;border-right:1px solid #F2F5F8;white-space:nowrap}
+table.matriz thead th{background:var(--azul);color:#fff;font-size:.7rem;font-weight:700;position:sticky;top:0}
+table.matriz thead th.anio{background:var(--azul-claro);border-bottom:1px solid rgba(255,255,255,.2)}
+table.matriz th.esq{text-align:left;background:var(--azul)}
+table.matriz td.medio{text-align:left;font-weight:600;color:var(--texto);position:sticky;left:0;background:#fff;border-right:2px solid var(--linea);max-width:200px}
+table.matriz tbody tr:hover td{background:#F8FAFB}
+table.matriz tbody tr:hover td.medio{background:#EEF3F7}
+table.matriz td.subtot{background:#F4F7FA;font-weight:700;color:var(--azul)}
+table.matriz td.grantot{background:#EAF0F5;font-weight:800;color:var(--azul)}
+table.matriz th.subtot,table.matriz th.grantot{background:var(--azul-claro)}
+table.matriz td.prom{background:#F7FBF2;font-weight:600;color:#5a7d1f}
+table.matriz td.max{background:#FCF8F0;font-weight:600;color:#9a6a00}
+table.matriz th.prom,table.matriz th.max{background:var(--azul-claro)}
+table.matriz td.dcol,table.matriz th.dcol{padding:4px 5px}
+table.matriz .vchip{font-size:.62rem;font-weight:700;padding:1px 4px;border-radius:9px;display:inline-block;white-space:nowrap}
+table.matriz .vchip.verde{background:#E7F4E4;color:#2E7D22}
+table.matriz .vchip.rojo{background:#FBE4E1;color:#B3261E}
+table.matriz .vchip.neutro{background:#F0F2F5;color:#8893A0}
+table.matriz tfoot .fila-total td{background:var(--verde);color:var(--azul);font-weight:800;border-top:2px solid var(--azul)}
+table.matriz tfoot .fila-total td.medio{position:sticky;left:0;background:var(--verde)}
+table.matriz tfoot .fila-total td.prom,table.matriz tfoot .fila-total td.max,table.matriz tfoot .fila-total td.subtot{background:#8fb82e}
+table.matriz tfoot .fila-total .vchip{background:rgba(255,255,255,.6)}
+
+/* ---- Responsive ---- */
+@media(max-width:1100px){
+  .panel-cuerpo{grid-template-columns:1fr}
+  .tabla-val{max-height:240px}
+}
+@media(max-width:900px){
+  .col-8,.col-6,.col-4{grid-column:span 12}
+  .contenido{padding:16px}
+}
+.leyenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:.78rem;color:var(--texto-suave)}
+.leyenda span{display:inline-flex;align-items:center;gap:6px}
+.leyenda .cuadro{width:12px;height:12px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+
+<!-- ============================ LOGIN ============================ -->
+<div id="vistaLogin">
+  <div class="login-card">
+    <div class="login-logo"><span class="h1"></span><span class="h2"></span></div>
+    <h1>Panel de Urgencias</h1>
+    <p class="sub">Dolormed · RedesImat — acceso restringido</p>
+    <div class="campo">
+      <label for="correo">Correo</label>
+      <input type="email" id="correo" placeholder="usuario@clinica.com" autocomplete="email">
+    </div>
+    <div class="campo">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn-primario" id="btnEntrar">Iniciar sesión</button>
+    <div class="mensaje" id="msgLogin"></div>
+    <div class="login-aviso">
+      🔒 Esta plataforma contiene información clínica protegida. El acceso queda
+      registrado. Solo personal autorizado.
+    </div>
+  </div>
+</div>
+
+<!-- ============================ APP ============================ -->
+<div id="vistaApp" class="hidden">
+
+  <div id="bannerConfig" class="hidden">
+    ⚙️ Supabase no está configurado todavía. La app funciona en modo local
+    (los datos no se guardan al cerrar). Edita las credenciales en el archivo para activar el guardado.
+  </div>
+
+  <div class="topbar">
+    <button class="btn-menu" id="btnMenu" title="Mostrar/ocultar menú">☰</button>
+    <div class="marca"><span class="punto"></span> Panel de Urgencias</div>
+    <div class="sep"></div>
+    <button class="btn-import-top" id="btnAbrirImport">⬆ Importar Excel</button>
+    <span class="usuario" id="usuarioActivo"></span>
+    <button class="btn-salir" id="btnSalir">Salir</button>
+  </div>
+
+  <div class="layout">
+
+    <!-- ===== Barra lateral de navegación ===== -->
+    <aside class="sidebar" id="sidebar">
+      <button class="nav-item nav-general activo" data-vista="general">
+        <span class="nav-ic">▦</span> Vista general
+      </button>
+
+      <div class="nav-modulo">
+        <button class="nav-grupo" data-clinica="Dolormed">
+          <span class="nav-punto verde"></span> Dolormed
+        </button>
+        <div class="nav-subs">
+          <button class="nav-item nav-sub" data-vista="sede" data-clinica="Dolormed" data-sede="Tulua">Tuluá</button>
+          <button class="nav-item nav-sub" data-vista="sede" data-clinica="Dolormed" data-sede="Zarzal">Zarzal</button>
+        </div>
+      </div>
+
+      <div class="nav-modulo">
+        <button class="nav-grupo" data-clinica="RedesImat">
+          <span class="nav-punto azul"></span> RedesImat
+        </button>
+        <div class="nav-subs">
+          <button class="nav-item nav-sub" data-vista="sede" data-clinica="RedesImat" data-sede="Buga">Buga</button>
+          <button class="nav-item nav-sub" data-vista="sede" data-clinica="RedesImat" data-sede="Cerrito">Cerrito</button>
+        </div>
+      </div>
+
+      <button class="nav-item nav-comp" data-vista="comparacion">
+        <span class="nav-ic">⇄</span> Comparación
+      </button>
+    </aside>
+
+    <!-- ===== Contenido principal ===== -->
+    <main class="contenido">
+
+      <!-- Estado vacío -->
+      <div id="estadoVacio">
+        <div class="icono">📊</div>
+        <h2>Aún no hay datos cargados</h2>
+        <p>Importa los archivos de urgencias (.xlsx) de Dolormed o RedesImat para
+           ver los indicadores. Solo se mostrarán datos agregados; nunca se exhiben
+           nombres ni documentos de pacientes.</p>
+        <button class="btn-import" id="btnImportVacio">⬆ Importar primer archivo</button>
+      </div>
+
+      <!-- Encabezado de la vista activa -->
+      <div id="tablero" class="hidden">
+        <div class="vista-cab">
+          <h2 id="vistaTitulo">Vista general</h2>
+          <p id="vistaSub">Todas las clínicas y sedes</p>
+        </div>
+
+        <!-- Secciones colapsables (acordeón). Los KPIs se generan dentro de la sección "general". -->
+        <div id="rejillaPaneles"></div>
+
+        <!-- Vista de comparación (se rellena aparte) -->
+        <div id="vistaComparacion" class="hidden"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============================ MODAL IMPORTACIÓN ============================ -->
+<div class="modal-fondo hidden" id="modalImport">
+  <div class="modal">
+    <h2>Importar archivo de urgencias</h2>
+    <p>Sube un Excel (.xlsx) con las hojas por sede. La app detecta automáticamente
+       la clínica y normaliza médicos, aseguradoras y medios de ingreso.</p>
+
+    <div class="aviso-legal">
+      ⚠️ <strong>Datos sensibles:</strong> este archivo contiene información personal
+      de pacientes (Ley 1581 de 2012). Al importar, los registros se guardan en la base
+      de datos. Los paneles solo mostrarán información agregada.
+    </div>
+
+    <div class="zona-soltar" id="zonaSoltar">
+      <div class="ic">📁</div>
+      <div class="t">Arrastra el archivo aquí o haz clic para elegir</div>
+      <div class="s">Formato .xlsx — Dolormed o RedesImat</div>
+    </div>
+    <input type="file" id="inputArchivo" accept=".xlsx,.xls" class="hidden">
+
+    <div class="progreso" id="progreso">
+      <div class="pista"><div class="relleno" id="rellenoProg"></div></div>
+      <div class="txt" id="txtProg">Procesando…</div>
+    </div>
+
+    <div class="modal-botones">
+      <button class="btn-sec" id="btnCerrarModal">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// GeoJSON simplificado de los 42 municipios del Valle del Cauca (para el mapa)
+const VALLE_GEOJSON = {"type":"FeatureCollection","features":[{"type":"Feature","properties":{"nombre":"CALI"},"geometry":{"type":"Polygon","coordinates":[[[-76.491,3.506],[-76.475,3.451],[-76.461,3.329],[-76.493,3.289],[-76.559,3.283],[-76.608,3.314],[-76.696,3.311],[-76.707,3.428],[-76.65,3.466],[-76.595,3.548],[-76.548,3.5],[-76.491,3.506]]]}},{"type":"Feature","properties":{"nombre":"ANDALUCÍA"},"geometry":{"type":"Polygon","coordinates":[[[-76.071,4.089],[-76.172,4.12],[-76.245,4.168],[-76.249,4.184],[-76.236,4.214],[-76.151,4.183],[-76.071,4.089]]]}},{"type":"Feature","properties":{"nombre":"ANSERMANUEVO"},"geometry":{"type":"Polygon","coordinates":[[[-75.989,4.881],[-75.915,4.873],[-75.936,4.807],[-75.964,4.801],[-76.016,4.692],[-76.089,4.736],[-76.147,4.785],[-76.138,4.843],[-76.071,4.837],[-75.989,4.881]]]}},{"type":"Feature","properties":{"nombre":"ARGELIA"},"geometry":{"type":"Polygon","coordinates":[[[-76.089,4.736],[-76.123,4.651],[-76.194,4.682],[-76.147,4.785],[-76.089,4.736]]]}},{"type":"Feature","properties":{"nombre":"GUADALAJARA DE BUGA"},"geometry":{"type":"Polygon","coordinates":[[[-76.313,3.993],[-76.227,3.932],[-76.141,3.904],[-76.101,3.957],[-76.084,3.906],[-75.998,3.894],[-75.873,3.926],[-75.85,3.889],[-75.917,3.749],[-75.955,3.714],[-75.999,3.756],[-76.082,3.77],[-76.105,3.82],[-76.178,3.805],[-76.277,3.838],[-76.373,3.812],[-76.313,3.993]]]}},{"type":"Feature","properties":{"nombre":"BUGALAGRANDE"},"geometry":{"type":"Polygon","coordinates":[[[-76.037,4.256],[-75.954,4.177],[-76.002,4.102],[-76.071,4.089],[-76.151,4.183],[-76.236,4.214],[-76.172,4.318],[-76.084,4.243],[-76.037,4.256]]]}},{"type":"Feature","properties":{"nombre":"CAICEDONIA"},"geometry":{"type":"Polygon","coordinates":[[[-75.803,4.396],[-75.792,4.338],[-75.795,4.31],[-75.825,4.215],[-75.893,4.299],[-75.855,4.364],[-75.867,4.411],[-75.803,4.396]]]}},{"type":"Feature","properties":{"nombre":"CALIMA"},"geometry":{"type":"Polygon","coordinates":[[[-76.499,4.064],[-76.415,4.009],[-76.424,3.942],[-76.478,3.865],[-76.561,3.848],[-76.593,3.863],[-76.714,3.842],[-76.815,3.875],[-76.888,3.993],[-76.86,4.03],[-76.681,3.965],[-76.625,4.015],[-76.589,3.993],[-76.499,4.064]]]}},{"type":"Feature","properties":{"nombre":"CANDELARIA"},"geometry":{"type":"Polygon","coordinates":[[[-76.291,3.471],[-76.33,3.383],[-76.3,3.366],[-76.343,3.282],[-76.461,3.329],[-76.475,3.451],[-76.375,3.45],[-76.291,3.471]]]}},{"type":"Feature","properties":{"nombre":"CARTAGO"},"geometry":{"type":"Polygon","coordinates":[[[-75.936,4.807],[-75.856,4.728],[-75.856,4.713],[-75.828,4.66],[-75.866,4.613],[-75.972,4.667],[-76.016,4.666],[-76.016,4.692],[-75.964,4.801],[-75.936,4.807]]]}},{"type":"Feature","properties":{"nombre":"EL ÁGUILA"},"geometry":{"type":"Polygon","coordinates":[[[-75.991,4.913],[-75.989,4.881],[-76.071,4.837],[-76.138,4.843],[-76.089,4.946],[-76.078,5.047],[-76.027,4.939],[-75.991,4.913]]]}},{"type":"Feature","properties":{"nombre":"EL CAIRO"},"geometry":{"type":"Polygon","coordinates":[[[-76.147,4.785],[-76.194,4.682],[-76.298,4.698],[-76.313,4.75],[-76.211,4.83],[-76.139,4.841],[-76.147,4.785]]]}},{"type":"Feature","properties":{"nombre":"EL CERRITO"},"geometry":{"type":"Polygon","coordinates":[[[-75.955,3.714],[-75.96,3.704],[-76.007,3.717],[-76.09,3.621],[-76.242,3.621],[-76.293,3.603],[-76.368,3.627],[-76.426,3.694],[-76.401,3.74],[-76.397,3.763],[-76.321,3.707],[-76.201,3.662],[-76.124,3.688],[-76.082,3.77],[-75.999,3.756],[-75.955,3.714]]]}},{"type":"Feature","properties":{"nombre":"EL DOVIO"},"geometry":{"type":"Polygon","coordinates":[[[-76.222,4.603],[-76.166,4.512],[-76.269,4.481],[-76.365,4.493],[-76.3,4.654],[-76.283,4.594],[-76.222,4.603]]]}},{"type":"Feature","properties":{"nombre":"FLORIDA"},"geometry":{"type":"Polygon","coordinates":[[[-76.062,3.355],[-76.038,3.301],[-76.056,3.223],[-76.191,3.227],[-76.229,3.277],[-76.343,3.282],[-76.3,3.366],[-76.182,3.357],[-76.089,3.388],[-76.062,3.355]]]}},{"type":"Feature","properties":{"nombre":"GINEBRA"},"geometry":{"type":"Polygon","coordinates":[[[-76.082,3.77],[-76.124,3.688],[-76.201,3.662],[-76.321,3.707],[-76.303,3.76],[-76.221,3.769],[-76.178,3.805],[-76.105,3.82],[-76.082,3.77]]]}},{"type":"Feature","properties":{"nombre":"GUACARÍ"},"geometry":{"type":"Polygon","coordinates":[[[-76.178,3.805],[-76.221,3.769],[-76.303,3.76],[-76.321,3.707],[-76.397,3.763],[-76.373,3.812],[-76.277,3.838],[-76.178,3.805]]]}},{"type":"Feature","properties":{"nombre":"ALCALÁ"},"geometry":{"type":"Polygon","coordinates":[[[-75.709,4.68],[-75.741,4.655],[-75.828,4.66],[-75.856,4.713],[-75.709,4.68]]]}},{"type":"Feature","properties":{"nombre":"OBANDO"},"geometry":{"type":"Polygon","coordinates":[[[-75.866,4.613],[-75.867,4.576],[-75.881,4.531],[-75.964,4.531],[-76.031,4.569],[-76.038,4.583],[-76.016,4.666],[-75.972,4.667],[-75.866,4.613]]]}},{"type":"Feature","properties":{"nombre":"PALMIRA"},"geometry":{"type":"Polygon","coordinates":[[[-75.96,3.704],[-75.993,3.609],[-75.985,3.559],[-76.037,3.453],[-76.122,3.476],[-76.291,3.471],[-76.375,3.45],[-76.475,3.451],[-76.491,3.506],[-76.426,3.694],[-76.368,3.627],[-76.293,3.603],[-76.242,3.621],[-76.09,3.621],[-76.007,3.717],[-75.96,3.704]]]}},{"type":"Feature","properties":{"nombre":"PRADERA"},"geometry":{"type":"Polygon","coordinates":[[[-76.037,3.453],[-76.062,3.355],[-76.089,3.388],[-76.182,3.357],[-76.3,3.366],[-76.33,3.383],[-76.291,3.471],[-76.122,3.476],[-76.037,3.453]]]}},{"type":"Feature","properties":{"nombre":"RESTREPO"},"geometry":{"type":"Polygon","coordinates":[[[-76.478,3.865],[-76.468,3.831],[-76.537,3.749],[-76.603,3.751],[-76.561,3.848],[-76.478,3.865]]]}},{"type":"Feature","properties":{"nombre":"RIOFRÍO"},"geometry":{"type":"Polygon","coordinates":[[[-76.249,4.184],[-76.245,4.168],[-76.303,4.067],[-76.415,4.009],[-76.499,4.064],[-76.449,4.162],[-76.348,4.159],[-76.326,4.195],[-76.249,4.184]]]}},{"type":"Feature","properties":{"nombre":"ROLDANILLO"},"geometry":{"type":"Polygon","coordinates":[[[-76.166,4.512],[-76.065,4.493],[-76.069,4.455],[-76.149,4.372],[-76.256,4.402],[-76.269,4.481],[-76.166,4.512]]]}},{"type":"Feature","properties":{"nombre":"SAN PEDRO"},"geometry":{"type":"Polygon","coordinates":[[[-76.101,3.957],[-76.141,3.904],[-76.227,3.932],[-76.313,3.993],[-76.3,4.049],[-76.162,4.023],[-76.101,3.957]]]}},{"type":"Feature","properties":{"nombre":"SEVILLA"},"geometry":{"type":"Polygon","coordinates":[[[-75.867,4.411],[-75.855,4.364],[-75.893,4.299],[-75.825,4.215],[-75.84,4.101],[-75.752,4.077],[-75.746,4.043],[-75.823,3.905],[-75.855,4.05],[-75.901,4.085],[-75.914,4.175],[-75.954,4.177],[-76.037,4.256],[-76.021,4.302],[-75.954,4.325],[-75.952,4.372],[-75.867,4.411]]]}},{"type":"Feature","properties":{"nombre":"TORO"},"geometry":{"type":"Polygon","coordinates":[[[-76.016,4.692],[-76.016,4.666],[-76.038,4.583],[-76.151,4.576],[-76.089,4.736],[-76.016,4.692]]]}},{"type":"Feature","properties":{"nombre":"TRUJILLO"},"geometry":{"type":"Polygon","coordinates":[[[-76.212,4.26],[-76.249,4.184],[-76.326,4.195],[-76.348,4.159],[-76.449,4.162],[-76.455,4.23],[-76.407,4.299],[-76.297,4.294],[-76.212,4.26]]]}},{"type":"Feature","properties":{"nombre":"TULUÁ"},"geometry":{"type":"Polygon","coordinates":[[[-75.823,3.905],[-75.85,3.889],[-75.873,3.926],[-75.998,3.894],[-76.084,3.906],[-76.101,3.957],[-76.162,4.023],[-76.3,4.049],[-76.303,4.067],[-76.245,4.168],[-76.172,4.12],[-76.071,4.089],[-76.002,4.102],[-75.954,4.177],[-75.914,4.175],[-75.901,4.085],[-75.855,4.05],[-75.823,3.905]]]}},{"type":"Feature","properties":{"nombre":"ULLOA"},"geometry":{"type":"Polygon","coordinates":[[[-75.714,4.713],[-75.709,4.68],[-75.856,4.713],[-75.856,4.728],[-75.714,4.713]]]}},{"type":"Feature","properties":{"nombre":"VERSALLES"},"geometry":{"type":"Polygon","coordinates":[[[-76.194,4.682],[-76.123,4.651],[-76.151,4.576],[-76.185,4.546],[-76.222,4.603],[-76.283,4.594],[-76.3,4.654],[-76.298,4.698],[-76.194,4.682]]]}},{"type":"Feature","properties":{"nombre":"VIJES"},"geometry":{"type":"Polygon","coordinates":[[[-76.401,3.74],[-76.426,3.694],[-76.426,3.681],[-76.506,3.699],[-76.537,3.749],[-76.468,3.831],[-76.445,3.746],[-76.401,3.74]]]}},{"type":"Feature","properties":{"nombre":"YOTOCO"},"geometry":{"type":"Polygon","coordinates":[[[-76.303,4.067],[-76.313,3.993],[-76.401,3.74],[-76.445,3.746],[-76.478,3.865],[-76.424,3.942],[-76.415,4.009],[-76.303,4.067]]]}},{"type":"Feature","properties":{"nombre":"YUMBO"},"geometry":{"type":"Polygon","coordinates":[[[-76.426,3.681],[-76.491,3.506],[-76.548,3.5],[-76.592,3.547],[-76.506,3.699],[-76.426,3.681]]]}},{"type":"Feature","properties":{"nombre":"ZARZAL"},"geometry":{"type":"Polygon","coordinates":[[[-75.895,4.426],[-75.878,4.41],[-75.952,4.372],[-75.954,4.325],[-76.021,4.302],[-76.037,4.256],[-76.084,4.243],[-76.172,4.318],[-76.149,4.372],[-76.069,4.455],[-76.038,4.465],[-75.958,4.402],[-75.895,4.426]]]}},{"type":"Feature","properties":{"nombre":"LA VICTORIA"},"geometry":{"type":"Polygon","coordinates":[[[-75.881,4.531],[-75.869,4.454],[-75.895,4.426],[-75.958,4.402],[-76.038,4.465],[-76.069,4.455],[-76.065,4.493],[-76.031,4.569],[-75.964,4.531],[-75.881,4.531]]]}},{"type":"Feature","properties":{"nombre":"LA UNIÓN"},"geometry":{"type":"Polygon","coordinates":[[[-76.038,4.583],[-76.031,4.569],[-76.065,4.493],[-76.166,4.512],[-76.185,4.546],[-76.151,4.576],[-76.038,4.583]]]}},{"type":"Feature","properties":{"nombre":"LA CUMBRE"},"geometry":{"type":"Polygon","coordinates":[[[-76.561,3.848],[-76.603,3.751],[-76.537,3.749],[-76.506,3.699],[-76.592,3.547],[-76.649,3.632],[-76.644,3.785],[-76.593,3.863],[-76.561,3.848]]]}},{"type":"Feature","properties":{"nombre":"JAMUNDÍ"},"geometry":{"type":"Polygon","coordinates":[[[-76.493,3.289],[-76.461,3.259],[-76.504,3.144],[-76.557,3.102],[-76.677,3.099],[-76.75,3.147],[-76.783,3.231],[-76.702,3.356],[-76.696,3.311],[-76.608,3.314],[-76.559,3.283],[-76.493,3.289]]]}},{"type":"Feature","properties":{"nombre":"BOLÍVAR"},"geometry":{"type":"Polygon","coordinates":[[[-76.269,4.481],[-76.256,4.402],[-76.149,4.372],[-76.172,4.318],[-76.212,4.26],[-76.297,4.294],[-76.407,4.299],[-76.455,4.23],[-76.488,4.236],[-76.549,4.338],[-76.539,4.396],[-76.482,4.415],[-76.365,4.493],[-76.269,4.481]]]}},{"type":"Feature","properties":{"nombre":"DAGUA"},"geometry":{"type":"Polygon","coordinates":[[[-76.593,3.863],[-76.644,3.785],[-76.649,3.632],[-76.595,3.548],[-76.65,3.466],[-76.707,3.428],[-76.748,3.434],[-76.855,3.564],[-76.794,3.665],[-76.822,3.706],[-76.775,3.763],[-76.815,3.875],[-76.714,3.842],[-76.593,3.863]]]}},{"type":"Feature","properties":{"nombre":"BUENAVENTURA"},"geometry":{"type":"Polygon","coordinates":[[[-76.86,4.03],[-76.888,3.993],[-76.815,3.875],[-76.775,3.763],[-76.822,3.706],[-76.794,3.665],[-76.855,3.564],[-76.748,3.434],[-76.707,3.428],[-76.702,3.356],[-76.789,3.218],[-76.909,3.201],[-76.938,3.114],[-76.998,3.155],[-77.101,3.185],[-77.178,3.156],[-77.234,3.108],[-77.316,3.174],[-77.347,3.14],[-77.43,3.254],[-77.498,3.216],[-77.55,3.231],[-77.48,3.323],[-77.337,3.448],[-77.367,3.484],[-77.301,3.57],[-77.228,3.583],[-77.184,3.655],[-77.198,3.746],[-77.181,3.832],[-77.283,3.842],[-77.318,3.95],[-77.212,4.009],[-77.243,4.084],[-77.314,4.029],[-77.359,3.926],[-77.45,4.039],[-77.353,4.198],[-77.307,4.165],[-77.159,4.183],[-77.05,4.095],[-76.994,4.121],[-76.915,4.096],[-76.86,4.03]]]}}]};
+
+/* ============================================================================
+   1. CONFIGURACIÓN DE SUPABASE
+   ----------------------------------------------------------------------------
+   Pega aquí la URL de tu proyecto y la clave pública (anon key).
+   NUNCA pongas la service_role key ni contraseñas: esta página es pública.
+   Mientras estén vacías, la app funciona en modo LOCAL (sin guardar).
+============================================================================ */
+const SUPABASE_URL      = "https://nrxucytjsllybnwjrpys.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_23k8twjXo1OxotV389mkTA_mMqe2c6S";
+
+let sb = null;
+const SUPABASE_ACTIVO = SUPABASE_URL && SUPABASE_ANON_KEY;
+if (SUPABASE_ACTIVO) {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+/* ============================================================================
+   2. NORMALIZACIÓN DE DATOS
+   Corrige las variantes de escritura para que los conteos sean correctos.
+============================================================================ */
+function quitarAcentos(s){
+  return s.replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I')
+          .replace(/Ó/g,'O').replace(/Ú/g,'U').replace(/Ñ/g,'N')
+          .replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i')
+          .replace(/ó/g,'o').replace(/ú/g,'u').replace(/ñ/g,'n');
+}
+function base(s){
+  if(s===null||s===undefined) return null;
+  s = String(s).toUpperCase().trim().replace(/\s+/g,' ');
+  return quitarAcentos(s);
+}
+
+// --- Médicos: une variantes y excluye no-médicos ---
+const MAPA_MEDICOS = {
+  'JAMES':'JAMES RESTREPO','JAMES RESTREPO':'JAMES RESTREPO','JAMES ANDRES RESTREPO':'JAMES RESTREPO',
+  'JEFERSON':'JEFFERSON DUQUE','JEFFERSON':'JEFFERSON DUQUE','JEFFERSON DUQUE':'JEFFERSON DUQUE','JEFFERSON DUQUE MARTINEZ':'JEFFERSON DUQUE',
+  'JULIO':'JULIO DOMINGUEZ','JULIO DOMINGUEZ':'JULIO DOMINGUEZ','JULIO EDUARDO DOMINGUEZ':'JULIO DOMINGUEZ',
+  'JUAN PABLO':'JUAN PABLO APONTE','JUAN PABLO APONTE':'JUAN PABLO APONTE',
+  'ANDRES CADAVID':'ANDRES CADAVID','ANDRES FELIPE CADAVID':'ANDRES CADAVID',
+  'FABIAN ALEXIS RESTREPO':'FABIAN ALEXIS RESTREPO','FABIAN ALEXIS RESTREPO O':'FABIAN ALEXIS RESTREPO',
+  'FABIAN RICARDO LA VERDE':'FABIAN RICARDO LAVERDE','FABIAN RICARDO LAVERDE':'FABIAN RICARDO LAVERDE',
+  'JAIME HERNAN MARTINEZ':'JAIME HERNAN MARTINEZ','JAIME HERNAN MARTINEZ MONCADA':'JAIME HERNAN MARTINEZ',
+  'JUAN ALEJANDRO VICTORIA':'JUAN ALEJANDRO VICTORIA','ANDRES ALEJANDRO VICTORIA':'JUAN ALEJANDRO VICTORIA',
+  'ANA GUTIERREZ':'ANA GUTIERREZ','ANA GUTIERRREZ':'ANA GUTIERREZ','ANA GUTIERREZ SANCHEZ':'ANA GUTIERREZ','ANA YENCI GUTIERREZ':'ANA GUTIERREZ',
+  'ISABELLA CALDERON':'ISABELLA CALDERON','ISABELLA CALDERON ZAPATA':'ISABELLA CALDERON',
+  'NATHALIA RIVAS':'NATHALIA RIVAS','ERIKA NATHALIA RIVAS D':'NATHALIA RIVAS',
+  'LAURA':'LAURA QUESADA','LAURA ISABEL QUESADA':'LAURA QUESADA',
+  'MARGARITA':'MARGARITA SUZUNAGA','MARGARITA SUZUNAGA':'MARGARITA SUZUNAGA',
+  'VANESSA':'VANESSA GUEVARA','VANESSA GUEVARA':'VANESSA GUEVARA',
+  'NELSON VIVEROS':'NELSON VIVEROS','NELSON DAVID VIVEROS':'NELSON VIVEROS',
+  'LUIS FERNANDO SANCHEZ':'LUIS FERNANDO SANCHEZ','LUIS FERNANDO SANCHEZ ESPINAL':'LUIS FERNANDO SANCHEZ','SANCHEZ':'LUIS FERNANDO SANCHEZ',
+  'DAGOBERTO':'DAGOBERTO MARTINEZ','DAGOBERTO MARTINEZ H':'DAGOBERTO MARTINEZ',
+  'DAMIAN VELEZ':'DAMIAN VELEZ QUINTERO','DAMIAN VELEZ QUINTERO':'DAMIAN VELEZ QUINTERO',
+  'SOLARTE':'CARLOS SOLARTE','CARLOS SOLARTE':'CARLOS SOLARTE',
+  'LUIS ANGEL':'LUIS ANGEL CASTRO','LUIS ANGEL CASTRO':'LUIS ANGEL CASTRO',
+  'MARIA CAMILA LOPEZ':'MARIA CAMILA LOPEZ','MARIA CAMILA LOPEZ R':'MARIA CAMILA LOPEZ',
+  'CARLOS AGUDELO':'CARLOS AGUDELO',
+};
+const NO_MEDICOS = new Set(['ENFERMERIA','RADIOLOGO','NO HAY HC','CX PROGRAMADA GERARDO','GERARDO CASTILLO RIVERO','ARMANDO A YARURO']);
+
+function normMedico(v){
+  let s = base(v);
+  if(!s) return null;
+  s = s.replace(/^(DR|DRA|DOC|DR\.|DRA\.)\s+/,'').replace(/\s+/g,' ').trim();
+  if(NO_MEDICOS.has(s)) return '(No médico / otros)';
+  return MAPA_MEDICOS[s] || titulo(s);
+}
+
+// --- Aseguradoras: agrupa por raíz conocida ---
+function normAseguradora(v){
+  let s = base(v);
+  if(!s) return 'SIN DATO';
+  const esSoat = /SOAT/.test(s);
+  let raiz = s;
+  if(/PREVISORA|PREVISER/.test(s)) raiz='LA PREVISORA';
+  else if(/MUNDIAL/.test(s)) raiz='SEGUROS MUNDIAL';
+  else if(/COLPATRIA/.test(s)) raiz='AXA COLPATRIA';
+  else if(/BOLIVAR/.test(s)) raiz='SEGUROS BOLIVAR';
+  else if(/SURA/.test(s)) raiz='SURA';
+  else if(/ESTADO/.test(s)) raiz='SEGUROS DEL ESTADO';
+  else if(/POSITIVA/.test(s)) raiz='POSITIVA';
+  else if(/EQUIDAD/.test(s)) raiz='LA EQUIDAD';
+  else if(/COOMEVA/.test(s)) raiz='COOMEVA';
+  else if(/ADRES/.test(s)) raiz='ADRES';
+  else if(/PARTICULAR|PROPIOS|N\/A/.test(s)) raiz='PARTICULAR';
+  else if(/HDI/.test(s)) raiz='HDI SEGUROS';
+  else raiz = titulo(s.replace(/\s*-\s*\[?SOAT\]?/,'').replace(/\s+SOAT/,'').trim());
+  return titulo(raiz) + (esSoat ? ' (SOAT)' : '');
+}
+
+// --- Medio de ingreso: agrupa categorías ---
+function normMedio(v){
+  let s = base(v);
+  if(!s) return 'Sin dato';
+  if(/^911/.test(s)) return '911';
+  if(/RECONSULTA/.test(s)) return 'Reconsulta';
+  if(/PROPIOS MEDIOS/.test(s)) return 'Propios medios';
+  if(/REDESIMAT/.test(s)) return 'Ambulancias RedesImat';
+  if(/DOLORMED/.test(s)) return 'Remisión Dolormed';
+  if(/AMBULANCIA/.test(s)) return 'Ambulancia';
+  if(/BOMBEROS/.test(s)) return 'Bomberos';
+  if(/CRUZ ROJA/.test(s)) return 'Cruz Roja';
+  if(/DEFENSA CIVIL/.test(s)) return 'Defensa Civil';
+  if(/HOSPITAL/.test(s)) return 'Remisión hospital';
+  if(/EMERGENCY TIME/.test(s)) return 'Emergency Time';
+  if(/VITAL GROUP|MEDIUNIDOS|FUL FENIX|OPOSITIVA/.test(s)) return 'Convenio empresarial';
+  if(/SUB SALUD/.test(s)) return 'Subsidiado';
+  return titulo(s);
+}
+
+function normMunicipio(v){
+  let s = base(v);
+  if(!s || s==='ARL' || s==='N/A') return null;
+  return titulo(s);
+}
+
+// Normaliza el TIPO DE ATENCION a 'SOAT' u 'OTROS'.
+// Cerrito usa "OTRO" (singular) y la columna se llama "MEDIO"; aquí lo unificamos.
+function normTipo(v){
+  const s = base(v);
+  if(!s) return 'OTROS';
+  if(/SOAT/.test(s)) return 'SOAT';
+  return 'OTROS';   // OTRO, OTROS, o cualquier otra cosa -> OTROS
+}
+
+function titulo(s){
+  if(!s) return s;
+  return s.toLowerCase().replace(/\b\w/g, c=>c.toUpperCase());
+}
+
+// Normaliza el medio CONSERVANDO el detalle del hospital/entidad (para la tabla matriz de Tuluá).
+// Une variantes de escritura. Devuelve null para los medios internos que se excluyen.
+const MEDIOS_INTERNOS_EXCLUIR = new Set(['911','PROPIOS MEDIOS','EMERGENCY TIME','RECONSULTA','REDESIMAT','TELECONSULTA','N/A']);
+function normMedioDetalle(v){
+  let s = base(v);
+  if(!s) return null;
+  if(MEDIOS_INTERNOS_EXCLUIR.has(s)) return null;
+  // unificar variantes conocidas
+  if(/SUB SALUD/.test(s)) return 'Sub Salud';
+  if(/VITAL GROUP/.test(s)) return 'Vital Group';
+  if(/CORAZON DEL VALL/.test(s)) return 'Corazón del Valle';
+  if(/BUGALAGRANDE/.test(s) && /HOSPITAL/.test(s)) return 'Hospital Bugalagrande';
+  if(/BUGALAGRANDE/.test(s) && /BOMBEROS/.test(s)) return 'Bomberos Bugalagrande';
+  if(/DEFENSA CIVIL/.test(s)) return 'Defensa Civil Buga';
+  if(/ANDALUCIA/.test(s) && /BOMBEROS/.test(s)) return 'Bomberos Andalucía';
+  if(/ANDALUCIA/.test(s)) return 'Hospital Andalucía';
+  if(/TRUJILLO/.test(s)) return 'Hospital Trujillo';
+  if(/SAN ?PEDRO/.test(s)) return 'Hospital San Pedro';
+  if(/RIOFRIO/.test(s)) return 'Hospital Riofrío';
+  if(/BOLIVAR/.test(s)) return 'Hospital Bolívar';
+  if(/TORO/.test(s)) return 'Hospital Toro';
+  if(/ROLDANILLO/.test(s)) return 'Hospital Roldanillo';
+  if(/EL? DOVIO|DEL DOVIO/.test(s)) return 'Hospital El Dovio';
+  if(/LA UNION/.test(s)) return 'Hospital La Unión';
+  if(/RUBEN CRUZ/.test(s)) return 'Hospital Rubén Cruz';
+  if(/VERSALLES/.test(s)) return 'Hospital Versalles';
+  if(/(HOSPITAL )?OBANDO|REMISION OBANDO|AMBULANCIA DE OBANDO/.test(s)) return 'Hospital Obando';
+  if(/DOLORMED ZARZAL|REMISION ZARZAL/.test(s)) return 'Dolormed Zarzal';
+  if(/CERRITO RED/.test(s)) return 'Cerrito Redes';
+  if(/ALFAMED/.test(s)) return 'Alfamed';
+  if(/MEDIUNIDOS/.test(s)) return 'Mediunidos';
+  if(/RIOPAILA/.test(s)) return 'Ingenio Riopaila';
+  if(/BOMBEROS TULUA/.test(s)) return 'Bomberos Tuluá';
+  if(/CARDIO/.test(s)) return 'Cardio';
+  if(/CARMELITA/.test(s)) return 'Carmelita';
+  if(/EL DOVIO|DEL DOVIO/.test(s)) return 'Hospital El Dovio';
+  // resto de hospitales no listados explícitamente: conservar con título
+  return titulo(s);
+}
+
+// Clasifica un medio para las tablas matriz: devuelve {nombre, set}.
+//   set 'alto'  -> 911, Propios medios, Emergency Time, Reconsulta, RedesImat
+//   set 'bajo'  -> el resto (remisiones externas, hospitales, etc.)
+// Devuelve null para valores vacíos o sin interés (N/A, teleconsulta).
+function clasificarMedioMatriz(v, sede){
+  let s = base(v);
+  if(!s || s==='N/A' || /TELECONSULTA/.test(s)) return null;
+
+  // ---- BUGA: reglas propias (según listas del usuario) ----
+  if(sede==='Buga'){
+    // Alto valor en Buga: Propios medios y RedesImat (incluye sus variantes con sufijo)
+    if(/PROPIOS MEDIOS/.test(s)) return {nombre:'Propios medios', set:'alto'};
+    if(/REDESIMAT|REDES IMAT/.test(s) && !/CERRITO/.test(s)) return {nombre:'RedesImat', set:'alto'};
+    if(/RECONSULTA/.test(s)) return {nombre:'Reconsulta', set:'alto'};
+    // Bajo volumen: hospitales, ambulancias, bomberos, remisiones externas
+    const det = normMedioDetalleBuga(v);
+    if(!det) return null;
+    return {nombre:det, set:'bajo'};
+  }
+
+  // ---- TULUÁ (y por defecto) ----
+  // medios de alto valor (internos)
+  if(/^911/.test(s)) return {nombre:'911', set:'alto'};
+  if(/PROPIOS MEDIOS/.test(s)) return {nombre:'Propios medios', set:'alto'};
+  if(/EMERGENCY TIME/.test(s)) return {nombre:'Emergency Time', set:'alto'};
+  if(/RECONSULTA/.test(s)) return {nombre:'Reconsulta', set:'alto'};
+  if(/REDESIMAT/.test(s)) return {nombre:'Ambulancias RedesImat', set:'alto'};
+  // resto -> bajo volumen, con el nombre detallado/unificado
+  const det = normMedioDetalle(v);
+  if(!det) return null;
+  return {nombre:det, set:'bajo'};
+}
+
+// Normaliza medios de BAJO VOLUMEN de Buga (hospitales/ambulancias/bomberos) uniendo variantes.
+function normMedioDetalleBuga(v){
+  let s = base(v);
+  if(!s) return null;
+  // excluir los de alto valor y los internos que no son remisión
+  if(/PROPIOS MEDIOS|RECONSULTA|^911|EMERGENCY TIME|RETIRO DE MAOS|ALTA VOLUNTARIA|EVENTO ADVERSO|CARDIOURGENCIAS|CARDIO URG/.test(s)) return null;
+  if(/REDESIMAT|REDES IMAT/.test(s) && !/CERRITO/.test(s)) return null;
+  // unificar variantes conocidas (nombres tal como el usuario los listó)
+  if(/SAN ROQUE GUACARI/.test(s)) return 'Hospital San Roque Guacarí';
+  if(/SAN JOSE RESTREPO/.test(s)) return 'Hospital San José Restrepo';
+  if(/DEFENSA CIVIL/.test(s)) return 'Defensa Civil';
+  if(/CRUZ ROJA/.test(s)) return 'Cruz Roja';
+  if(/MEDICA DEL ATLANTICO/.test(s)) return 'Ambulancia Médica del Atlántico';
+  if(/BOMBEROS YOTOCO/.test(s)) return 'Bomberos Yotoco';
+  if(/SAN JORGE CALIMA/.test(s)) return 'Hospital San Jorge Calima';
+  if(/REDESIMAT EL CERRITO|REDES IMAT CERRITO/.test(s)) return 'RedesImat El Cerrito';
+  if(/DOLORMED ZARZAL/.test(s)) return 'Dolormed Zarzal';
+  if(/DOLORMED/.test(s)) return 'Dolormed';
+  if(/EMERG GUACARI|AMBULANCIA EMERG G\b/.test(s)) return 'Ambulancia Emerg Guacarí';
+  if(/LOCAL YOTOCO/.test(s)) return 'Hospital Local Yotoco';
+  if(/BOMBEROS BUGA\b/.test(s)) return 'Bomberos Buga';
+  if(/ROSARIO GINEBRA/.test(s)) return 'Hospital del Rosario Ginebra';
+  if(/SERVI EMER/.test(s)) return 'Ambulancia Servi Emer';
+  if(/ULPIANO TASCON SAN PEDRO|ULPIANO TASCON QUINTERO/.test(s)) return 'Hospital Ulpiano Tascón San Pedro';
+  if(/SISMEDICA|SIS MEDICA/.test(s)) return 'Ambulancia Sismédica';
+  if(/BOMBEROS LA MAGDALENA/.test(s)) return 'Bomberos La Magdalena';
+  if(/DIVINO NIÑO|DIVINO NINO/.test(s)) return 'Hospital Divino Niño';
+  if(/ROLDANILLO/.test(s)) return 'Hospital de Roldanillo';
+  if(/SAN RAFAEL EL CERRITO/.test(s)) return 'Hospital San Rafael El Cerrito';
+  if(/GONZALO CONTRERAS LA UNION/.test(s)) return 'Hospital Gonzalo Contreras La Unión';
+  if(/TRUJILLO/.test(s)) return 'Hospital Trujillo';
+  if(/BOMBEROS GINEBRA/.test(s)) return 'Bomberos Ginebra';
+  if(/SAN BERNABE BUGALAGRANDE/.test(s)) return 'Hospital San Bernabé Bugalagrande';
+  if(/RESTREPO\(SERVIMEDIC\)|SERVIMEDIC/.test(s)) return 'Restrepo (Servimedic)';
+  // otros hospitales/ambulancias no listados explícitamente: conservar con título
+  if(/HOSPITAL|AMBULANCIA|BOMBEROS|CENTRO MEDICO|CLINICA/.test(s)) return titulo(s);
+  return null;
+}
+
+// Clasifica la ENTIDAD ASEGURADORA como ARL. Devuelve el nombre de la serie ARL
+// o null si el registro NO es ARL (solo cuenta riesgos laborales, no SOAT/salud).
+function clasificarARL(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // ARL solo aplica a atención tipo "Otros" (no SOAT)
+  let s = base(v);
+  if(!s) return null;
+  const esARL = /ARL/.test(s);   // debe estar marcado explícitamente como ARL
+  if(!esARL) return null;
+
+  // ---- BUGA: entidades ARL con normalización ligera (variantes obvias) ----
+  if(sede==='Buga'){
+    if(/SURA|SURAMERICANA/.test(s)) return 'ARL Sura';
+    if(/POSITIVA/.test(s))          return 'Positiva ARL';
+    if(/BOLIVAR/.test(s))           return 'Bolívar ARL';
+    if(/AXA|COLPATRIA/.test(s))     return 'AXA Colpatria ARL';
+    if(/COLMENA/.test(s))           return 'ARL Colmena';
+    if(/EQUIDAD/.test(s))           return 'Equidad ARL';
+    if(/COLSANITAS/.test(s))        return 'ARL Colsanitas';
+    if(/ALFA/.test(s))              return 'Seguros de Vida Alfa ARL';
+    return 'Otros';   // ruido (p.ej. medio ARL pero aseguradora SOAT) -> Otros
+  }
+
+  // ---- TULUÁ ----
+  // mapear a las 6 series oficiales (une variantes de escritura)
+  if(/SURA|SURAMERICANA/.test(s)) return 'Seguros de Vida Suramericana S.A - ARL';
+  if(/AXA|COLPATRIA/.test(s))     return 'AXA Colpatria ARL';
+  if(/COLMENA|COMENA|COMENA/.test(s)) return 'Colmena ARL';
+  if(/POSITIVA/.test(s))          return 'Positiva ARL';
+  if(/BOLIVAR/.test(s))           return 'Seguros Bolívar - ARL';
+  if(/EQUIDAD/.test(s))           return 'La Equidad Seguros de Vida O.C - ARL';
+  if(/ALFA/.test(s))              return 'Alfa ARL';
+  // otras ARL no listadas: conservar con título
+  return titulo(s.replace(/\s*-?\s*ARL\s*/,' ').trim()) + ' ARL';
+}
+
+// Clasifica la ENTIDAD ASEGURADORA como Particular / Prepagada / Plan Complementario.
+// Devuelve el nombre de una de las 8 series oficiales, o null si no encaja.
+function clasificarParticular(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // Particular/PPP solo aplica a atención tipo "Otros" (no SOAT)
+  let s = base(v);
+  if(!s) return null;
+  // excluir explícitamente lo que es ARL o SOAT (van en otras tablas)
+  if(/ARL|SOAT/.test(s)) return null;
+
+  // ---- BUGA: PPP con normalización ligera (13 entidades de la lista) ----
+  if(sede==='Buga'){
+    if(/SOS|PLAN(ES)? COMPLE/.test(s))      return 'SOS Planes Complementarios';
+    if(/COOMEVA/.test(s))                   return 'Coomeva Medicina Prepagada';
+    if(/SURA.*POLIZA|SURA.*SALUD/.test(s))  return 'Sura Pólizas de Salud';
+    if(/MEDISANITAS/.test(s))               return 'Medisanitas Prepagada';
+    if(/COLSANITAS/.test(s))                return 'Colsanitas Prepagada';
+    if(/ALLIANZ/.test(s))                   return 'Allianz Póliza Salud';
+    if(/PREVISER/.test(s))                  return 'Previser';
+    if(/AXA.*PREPAGADA/.test(s))            return 'AXA Prepagada';
+    if(/AXA.*SEGUROS DE VIDA|AXA COLPATRIA SEGUROS S/.test(s)) return 'AXA Colpatria Seguros S.A.';
+    if(/PREPAGADA BOLIVAR|BOLIVAR.*PREPAGADA/.test(s)) return 'Prepagada Bolívar';
+    if(/MEDPLUS/.test(s))                   return 'Medplus';
+    if(s==='PARTICULAR')                    return 'Particular';
+    return null;   // lo que no encaje se omite
+  }
+
+  // ---- TULUÁ ----
+  // --- SOS planes complementarios ---
+  if(/SOS/.test(s) && /FAMILIAR|FLIAR/.test(s)) return 'SOS Planes Complementarios (Familiar)';
+  if(/SOS/.test(s)) return 'SOS Planes Complementarios (Bienestar)';  // resto de SOS -> bienestar
+  // --- Coomeva (todo junto en una sola serie) ---
+  if(/COOMEVA/.test(s)) return 'Coomeva Medicina Prepagada S.A';
+  // --- Dolormed VIP ---
+  if(/DOLORMED VIP|VIP DOLORMED|PARTICULAR VIP/.test(s)) return 'Dolormed VIP';
+  // --- Previser ---
+  if(/PREVISER/.test(s)) return 'Previser';
+  // --- AXA Colpatria medicina prepagada ---
+  if(/AXA.*PREPAGADA|COLPATRIA.*PREPAGADA/.test(s)) return 'AXA Colpatria Seguros de Vida S.A - Medicina Prepagada';
+  // --- Proeval ---
+  if(/PROEVAL/.test(s)) return 'Proeval';
+  // --- Sura prepagada -> se corrige a Sura Póliza de Salud, pero NO está en la lista -> omitir ---
+  // --- Particular (exacto o casi) ---
+  if(s==='PARTICULAR') return 'Particular';
+  // nada más encaja -> omitir
+  return null;
+}
+
+// Clasifica la ENTIDAD ASEGURADORA como Póliza Estudiantil / Salud.
+// Devuelve una de las 12 series oficiales, o null si no encaja (excluye SOAT/ARL).
+function clasificarPoliza(v, sede, tipo){
+  if(tipo && tipo!=='OTROS') return null;   // Pólizas estudiantiles solo aplica a atención tipo "Otros" (no SOAT)
+  let s = base(v);
+  if(!s) return null;
+  if(/ARL/.test(s)) return null;   // ARL va en otra tabla
+
+  // ---- BUGA: pólizas estudiantiles (8 entidades de la lista) ----
+  if(sede==='Buga'){
+    // en Buga la marca de estudiantil está en la aseguradora
+    const esEst = /POLIZA ESTUDIANTIL|ESTUDIANTIL/.test(s);
+    if(!esEst) return null;
+    if(/MUNDIAL/.test(s))                 return 'Mundial Póliza Estudiantil';
+    if(/ESTADO/.test(s))                  return 'Seguros del Estado Póliza Estudiantil';
+    if(/AXA|COLPATRIA/.test(s))           return 'AXA Colpatria Póliza Estudiantil';
+    if(/POSITIVA/.test(s))                return 'Positiva Póliza Estudiantil';
+    if(/EQUIDAD/.test(s))                 return 'Equidad Póliza Estudiantil';
+    if(/SOLIDARIA/.test(s))               return 'Aseguradora Solidaria Estudiantil';
+    if(/PREVISORA/.test(s))               return 'La Previsora Póliza Estudiantil';
+    if(/ALLIAN/.test(s))                  return 'Allianz Póliza Estudiantil';
+    return 'Otros';
+  }
+
+  // ---- TULUÁ ----
+  if(/SOAT/.test(s)) return null;   // SOAT va en otras tablas
+  // Debe ser claramente una póliza de salud/estudiantil/juvenil
+  const esPoliza = /POLIZA|POLIZAS|ESTUDIANTIL|JUVENIL|AP Y SALUD|PLAN DE SALUD|\bSALUD\b/.test(s);
+  if(!esPoliza) return null;
+
+  // --- Suramericana ---
+  if(/SURA/.test(s) && /JUVENIL/.test(s)) return 'Seguros de Vida Suramericana Pólizas Juveniles';
+  if(/SURA/.test(s)) return 'Seguros de Vida Suramericana Pólizas Salud';
+  // --- Allianz ---
+  if(/ALLIANZ/.test(s)) return 'Allianz Seguros de Vida S.A Pólizas de Salud';
+  // --- Bolívar ---
+  if(/BOLIVAR/.test(s)) return 'Seguros Bolívar Pólizas de Salud';
+  // --- Mundial ---
+  if(/MUNDIAL/.test(s)) return 'Seguros Mundial Póliza Estudiantil';
+  // --- Mapfre ---
+  if(/MAPFRE/.test(s)) return 'Mapfre Póliza Estudiantil';
+  // --- Solidaria (las dos fusionadas) ---
+  if(/SOLIDARIA/.test(s)) return 'Póliza Solidaria Estudiantil';
+  // --- La Equidad ---
+  if(/EQUIDAD/.test(s)) return 'La Equidad Seguros de Vida O.C - Pólizas Estudiantil';
+  // --- Positiva ---
+  if(/POSITIVA/.test(s)) return 'Positiva Compañía de Seguros AP y Salud';
+  // --- AXA Colpatria estudiantil/salud ---
+  if(/AXA|COLPATRIA/.test(s)) return 'AXA Colpatria Seguros (Estudiantil y Salud)';
+  // --- Estado: distinguir estudiantil vs salud ---
+  if(/ESTADO/.test(s) && /ESTUDIANTIL/.test(s)) return 'Seguros de Vida del Estado S.A (Estudiantil)';
+  if(/ESTADO/.test(s)) return 'Seguros de Vida del Estado S.A (Pólizas de Salud)';
+  // resto -> omitir
+  return null;
+}
+
+// Municipios oficiales del Valle del Cauca (nombres tal como están en el GeoJSON)
+const MUNICIPIOS_VALLE = ['ALCALÁ','ANDALUCÍA','ANSERMANUEVO','ARGELIA','BOLÍVAR','BUENAVENTURA','BUGALAGRANDE','CAICEDONIA','CALI','CALIMA','CANDELARIA','CARTAGO','DAGUA','EL CAIRO','EL CERRITO','EL DOVIO','EL ÁGUILA','FLORIDA','GINEBRA','GUACARÍ','GUADALAJARA DE BUGA','JAMUNDÍ','LA CUMBRE','LA UNIÓN','LA VICTORIA','OBANDO','PALMIRA','PRADERA','RESTREPO','RIOFRÍO','ROLDANILLO','SAN PEDRO','SEVILLA','TORO','TRUJILLO','TULUÁ','ULLOA','VERSALLES','VIJES','YOTOCO','YUMBO','ZARZAL'];
+
+// Normaliza el municipio del paciente al nombre oficial del Valle (GeoJSON).
+// Devuelve el nombre del municipio del Valle, o 'Otros' si es de otro departamento
+// o un dato inválido. Devuelve null si está vacío (no se cuenta).
+function normMunicipioValle(v){
+  let s = base(v);
+  if(!s) return null;
+  // descartar valores que claramente no son municipios
+  if(/^\d+$|^N\/A$|^OOG|RECONSULTA|REDES|^911$/.test(s)) return null;
+  // correcciones de variantes -> nombre GeoJSON
+  const mapa = {
+    'BUGA':'GUADALAJARA DE BUGA',
+    'CERRITO':'EL CERRITO',
+    'DOVIO':'EL DOVIO',
+    'BIUGALAGRANDE':'BUGALAGRANDE',
+    'AGUILA':'EL ÁGUILA',
+    'CAIRO':'EL CAIRO',
+    'UNION':'LA UNIÓN',
+    'BUGA LA GRANDE':'BUGALAGRANDE',
+  };
+  if(mapa[s]) return mapa[s];
+  // buscar coincidencia directa con el Valle (comparando sin acentos)
+  const sinAcento = x => base(x);
+  const match = MUNICIPIOS_VALLE.find(m => sinAcento(m)===s);
+  if(match) return match;
+  // no es del Valle -> Otros
+  return 'Otros';
+}
+
+/* ============================================================================
+   3. LECTURA DEL EXCEL
+============================================================================ */
+const COLS = {
+  admision:   ['NO ADMISION', 'ADMISIONES', 'ADMISION', 'NUMERO DE ADMISION', 'NO. ADMISION'],
+  medico:     ['ATENDIDO POR EL MEDICO'],
+  fecha:      ['FECHA DE ATENCION'],
+  hora:       ['HORA DE INGRESO'],
+  documento:  ['NUMERO DE DOCUMENTO'],
+  paciente:   ['NOMBRE DEL PACIENTE'],
+  medio:      ['MEDIO DE INGRESO'],
+  aseguradora:['ENTIDAD ASEGURADORA'],
+  tipo:       ['TIPO DE ATENCION', 'MEDIO'],
+  admisionador:['NOMBRE ADMISIONADOR'],
+  municipio:  ['MUNICIPIO'],
+};
+function buscarCol(fila, nombres){
+  const claves = Object.keys(fila);
+  for(const n of nombres){
+    const m = claves.find(k => base(k)===base(n));
+    if(m) return m;
+  }
+  return null;
+}
+function detectarClinica(nombreArchivo, nombreHoja){
+  const t = (nombreArchivo+' '+nombreHoja).toUpperCase();
+  if(t.includes('DOLORMED')) return 'Dolormed';
+  if(t.includes('REDESIMAT')||t.includes('REDES')) return 'RedesImat';
+  // por sede
+  if(/TULUA|ZARZAL/.test(t)) return 'Dolormed';
+  if(/BUGA|CERRITO/.test(t)) return 'RedesImat';
+  return 'Desconocida';
+}
+function nombreSede(nombreHoja){
+  return titulo(nombreHoja.replace(/^BD\s*/i,'').trim());
+}
+
+// Excel guarda la hora como fracción de día (0–1) o como texto "14:47"
+function extraerHora(valor){
+  if(valor===null||valor===undefined||valor==='') return null;
+  if(typeof valor==='number'){
+    let frac = valor;
+    if(frac>=1) frac = frac - Math.floor(frac); // por si viene como serial completo
+    const h = Math.floor(frac*24);
+    return (h>=0 && h<=23) ? h : null;
+  }
+  const m = String(valor).match(/(\d{1,2})[:.h]/);
+  if(m){ const h=parseInt(m[1]); return (h>=0&&h<=23)?h:null; }
+  return null;
+}
+function aISO(fechaExcel){
+  if(fechaExcel===null || fechaExcel===undefined || fechaExcel==='') return null;
+  let iso=null;
+  if(fechaExcel instanceof Date){
+    if(isNaN(fechaExcel)) return null;
+    iso = fechaExcel.toISOString().slice(0,10);
+  } else if(typeof fechaExcel==='number'){
+    const d = new Date(Math.round((fechaExcel-25569)*86400*1000));
+    iso = (d && !isNaN(d)) ? d.toISOString().slice(0,10) : null;
+  } else {
+    const d = new Date(fechaExcel);
+    iso = isNaN(d) ? null : d.toISOString().slice(0,10);
+  }
+  // descartar fechas absurdas (celdas corruptas que caen en 1970, etc.)
+  if(iso && (iso < '2018-01-01' || iso > '2030-12-31')) return null;
+  return iso;
+}
+
+function procesarLibro(workbook, nombreArchivo){
+  const registros = [];
+  workbook.SheetNames.forEach(hoja => {
+    const ws = workbook.Sheets[hoja];
+    const filas = XLSX.utils.sheet_to_json(ws, {raw:true, defval:null});
+    if(!filas.length) return;
+    const clinica = detectarClinica(nombreArchivo, hoja);
+    const sede = nombreSede(hoja);
+    const c = {};
+    for(const k in COLS) c[k] = buscarCol(filas[0], COLS[k]);
+    filas.forEach(f => {
+      const fechaISO = c.fecha ? aISO(f[c.fecha]) : null;
+      if(!fechaISO) return; // sin fecha no sirve para tendencia
+      const tipoCalc = normTipo(c.tipo ? f[c.tipo] : null);
+      registros.push({
+        clinica, sede,
+        no_admision:  c.admision ? String(f[c.admision]??'').trim() : null,
+        fecha: fechaISO,
+        hora: c.hora ? extraerHora(f[c.hora]) : null,
+        medico: normMedico(c.medico ? f[c.medico] : null),
+        // datos sensibles: se guardan pero NO se muestran en paneles
+        documento: c.documento ? String(f[c.documento]??'').trim() : null,
+        paciente:  c.paciente ? String(f[c.paciente]??'').trim() : null,
+        medio: normMedio(c.medio ? f[c.medio] : null),
+        medioMatriz: clasificarMedioMatriz(c.medio ? f[c.medio] : null, sede),
+        arl: clasificarARL(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
+        particular: clasificarParticular(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
+        poliza: clasificarPoliza(c.aseguradora ? f[c.aseguradora] : null, sede, tipoCalc),
+        muniValle: normMunicipioValle(c.municipio ? f[c.municipio] : null),
+        aseguradora: normAseguradora(c.aseguradora ? f[c.aseguradora] : null),
+        tipo: tipoCalc,
+        municipio: c.municipio ? normMunicipio(f[c.municipio]) : null,
+      });
+    });
+  });
+  return registros;
+}
+
+/* ============================================================================
+   4. ESTADO Y ALMACENAMIENTO
+============================================================================ */
+let DATOS = [];          // todos los registros cargados en memoria
+let usuarioCorreo = '';
+
+async function guardarEnSupabase(registros){
+  if(!SUPABASE_ACTIVO) return {local:true};
+  // Solo enviamos las columnas que existen en la tabla; los campos calculados
+  // en memoria (medioMatriz, arl, particular, poliza, muniValle) se quedan fuera.
+  const paraGuardar = registros.map(r => ({
+    clinica: r.clinica,
+    sede: r.sede,
+    no_admision: r.no_admision,
+    fecha: r.fecha,
+    hora: r.hora,
+    medico: r.medico,
+    documento: r.documento,
+    paciente: r.paciente,
+    medio: r.medio,
+    aseguradora: r.aseguradora,
+    tipo: r.tipo,
+    municipio: r.municipio,
+  }));
+  const LOTE = 500;
+  for(let i=0;i<paraGuardar.length;i+=LOTE){
+    const lote = paraGuardar.slice(i,i+LOTE);
+    // upsert: si (sede, no_admision) ya existe, se ignora en vez de duplicarse
+    const { error } = await sb.from('atenciones_urgencias')
+      .upsert(lote, { onConflict:'sede,no_admision', ignoreDuplicates:true });
+    if(error) throw error;
+    actualizarProgreso(40 + Math.round((i/paraGuardar.length)*55));
+  }
+  return {local:false};
+}
+
+async function cargarDesdeSupabase(){
+  if(!SUPABASE_ACTIVO) return [];
+  let todos=[]; let desde=0; const PAG=1000;
+  while(true){
+    const { data, error } = await sb.from('atenciones_urgencias')
+      .select('clinica,sede,fecha,hora,medico,medio,aseguradora,tipo,municipio')
+      .range(desde, desde+PAG-1);
+    if(error) throw error;
+    todos = todos.concat(data);
+    if(data.length < PAG) break;
+    desde += PAG;
+  }
+  // Los campos derivados (medioMatriz, arl, particular, poliza, muniValle) no se
+  // guardan en la tabla; se recalculan aquí a partir de los valores ya normalizados.
+  return todos.map(r => ({
+    ...r,
+    medioMatriz: clasificarMedioMatriz(r.medio, r.sede),
+    arl: clasificarARL(r.aseguradora, r.sede, r.tipo),
+    particular: clasificarParticular(r.aseguradora, r.sede, r.tipo),
+    poliza: clasificarPoliza(r.aseguradora, r.sede, r.tipo),
+    muniValle: normMunicipioValle(r.municipio),
+  }));
+}
+
+/* ============================================================================
+   5. NAVEGACIÓN Y CONTEXTO
+   La barra lateral define qué datos se ven. Ya no hay filtros superiores.
+============================================================================ */
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+// Contexto actual de navegación
+const contexto = { vista:'general', clinica:'', sede:'' };
+
+// Devuelve los registros del contexto activo (general = todos; sede = una sede)
+function datosContexto(){
+  return DATOS.filter(d=>{
+    if(contexto.clinica && d.clinica!==contexto.clinica) return false;
+    if(contexto.sede && d.sede!==contexto.sede) return false;
+    return true;
+  });
+}
+// Alias usado por los paneles
+function aplicarFiltros(){ return datosContexto(); }
+
+// Enlaza los botones de la barra lateral
+function enlazarNavegacion(){
+  document.querySelectorAll('.nav-item').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      contexto.vista = b.dataset.vista;
+      contexto.clinica = b.dataset.clinica || '';
+      contexto.sede = b.dataset.sede || '';
+      // marcar activo
+      document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('activo'));
+      b.classList.add('activo');
+      cambiarVista();
+    });
+  });
+  // botón menú (ocultar/mostrar barra lateral)
+  document.getElementById('btnMenu').addEventListener('click', ()=>{
+    document.getElementById('sidebar').classList.toggle('oculta');
+  });
+}
+
+// Cambia entre vista de paneles y vista de comparación
+function cambiarVista(){
+  const esComp = contexto.vista==='comparacion';
+  // el contenedor de secciones (que incluye los KPIs) se oculta en modo comparación
+  document.getElementById('rejillaPaneles').classList.toggle('hidden', esComp);
+  document.getElementById('vistaComparacion').classList.toggle('hidden', !esComp);
+  actualizarEncabezado();
+  if(esComp){ renderComparacion(); }
+  else { render(); }
+}
+
+function actualizarEncabezado(){
+  const t = document.getElementById('vistaTitulo');
+  const s = document.getElementById('vistaSub');
+  if(contexto.vista==='general'){
+    t.textContent = 'Vista general';
+    s.textContent = 'Todas las clínicas y sedes';
+  } else if(contexto.vista==='comparacion'){
+    t.textContent = 'Comparación entre clínicas y sedes';
+    s.textContent = 'Indicadores comparados, último mes y variación';
+  } else if(contexto.vista==='sede'){
+    t.textContent = `${contexto.clinica} — ${contexto.sede==='Tulua'?'Tuluá':contexto.sede}`;
+    s.textContent = `Sede de ${contexto.clinica}`;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Utilidades de conteo
+---------------------------------------------------------------------------- */
+function contar(arr, fn){
+  const m = {};
+  arr.forEach(x=>{ const k=fn(x); if(k===null||k===undefined||k==='') return; m[k]=(m[k]||0)+1; });
+  return m;
+}
+function topN(obj, n){
+  return Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,n);
+}
+
+/* ----------------------------------------------------------------------------
+   Variación vs mes anterior + semáforo
+   Regla acordada: subir = bueno. Umbral ±10%.
+     verde  : variación >= +10%
+     amarillo: entre -10% y +10%
+     rojo   : variación <= -10%
+---------------------------------------------------------------------------- */
+function mesesOrdenados(d){
+  return [...new Set(d.map(x=>x.fecha.slice(0,7)))].sort();
+}
+// calcula conteo del último mes y del anterior para un subconjunto
+function variacionMensual(d, filtroFn){
+  const sub = filtroFn ? d.filter(filtroFn) : d;
+  const meses = mesesOrdenados(sub);
+  if(meses.length===0) return {actual:0, previo:0, pct:null, mes:null};
+  const mesAct = meses[meses.length-1];
+  const mesPre = meses.length>1 ? meses[meses.length-2] : null;
+  const actual = sub.filter(x=>x.fecha.slice(0,7)===mesAct).length;
+  const previo = mesPre ? sub.filter(x=>x.fecha.slice(0,7)===mesPre).length : 0;
+  let pct = null;
+  if(mesPre && previo>0) pct = ((actual-previo)/previo)*100;
+  else if(mesPre && previo===0 && actual>0) pct = 100;
+  return {actual, previo, pct, mes:mesAct, mesPre};
+}
+// clasifica el color según la variación (subir = bueno)
+function semaforo(pct){
+  if(pct===null) return 'neutro';
+  if(pct >= 10) return 'verde';
+  if(pct <= -10) return 'rojo';
+  return 'amarillo';
+}
+function flecha(pct){
+  if(pct===null) return '–';
+  if(pct > 0) return '▲';
+  if(pct < 0) return '▼';
+  return '◆';
+}
+function fmtPct(pct){
+  if(pct===null) return 'sin mes previo';
+  const signo = pct>0?'+':'';
+  return `${signo}${pct.toFixed(1)}%`;
+}
+function nombreMes(clave){
+  if(!clave) return '';
+  const [y,m]=clave.split('-');
+  return `${MESES[parseInt(m)-1]} ${y}`;
+}
+
+/* ============================================================================
+   6. GRÁFICOS Y PANELES CONFIGURABLES
+============================================================================ */
+const C = {
+  azul:'#2A4161', azulT:'rgba(42,65,97,.12)',
+  verde:'#9ECB3B', verdeT:'rgba(158,203,59,.18)',
+  redes:'#2B5699', redesClaro:'#5B9FD5', gris:'#56595E',
+  paleta:['#2A4161','#9ECB3B','#2B5699','#5B9FD5','#CCDB28','#3C5A82','#7FA52E','#8894A3','#56595E','#AED457','#1A456B','#6B7785']
+};
+let charts = {};
+function destruir(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+Chart.defaults.font.family = "'Segoe UI',system-ui,sans-serif";
+Chart.defaults.color = '#6B7785';
+Chart.defaults.font.size = 11;
+// El plugin de etiquetas de datos se registra global pero lo desactivamos por defecto;
+// se activa solo en los gráficos que lo necesiten (p. ej. tendencia).
+if(window.ChartDataLabels){ Chart.register(window.ChartDataLabels); }
+Chart.defaults.plugins = Chart.defaults.plugins || {};
+Chart.defaults.plugins.datalabels = { display:false };
+
+const MESES_CORTO = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+/* ----------------------------------------------------------------------------
+   Definición de los paneles.
+   tipo:
+     'serie'      -> series temporales
+     'ranking'    -> top categorías en barras horizontales
+     'hora'       -> distribución por hora del día
+   Controles posibles: granularidad, ventana, comparacion, vista, top,
+     filtroAnio (multi), filtroMes (multi), filtroMunicipio (toggle múltiple)
+---------------------------------------------------------------------------- */
+// Secciones colapsables (acordeón). El orden aquí define el orden en pantalla.
+const SECCIONES = [
+  { id:'general', titulo:'1. Información general', kpis:true },
+  { id:'alto',    titulo:'2. Clientes Alto Valor', ocultarEnGeneral:true },
+  { id:'bajo',    titulo:'3. Clientes Bajo Volumen' },
+  { id:'arl',     titulo:'4. Clientes ARL' },
+  { id:'ppp',     titulo:'5. Clientes Particulares, Prepagadas y Planes Complementarios' },
+  { id:'poliza',  titulo:'6. Clientes Pólizas Estudiantiles' },
+  { id:'geo',     titulo:'7. Procedencia geográfica' },
+  { id:'otros',   titulo:'8. Otros indicadores', ocultarEnGeneral:true },
+];
+const PANELES = [
+  { id:'tendencia', seccion:'general', titulo:'Comportamiento Ingresos Urgencia',
+    desc:'Número de atenciones agregadas.',
+    col:'col-12', tipo:'serie',
+    etiquetas:true, ejeDesdeMin:true, tablaVariacion:true, contadorMeses:true,
+    controles:{granularidad:true, tipo:true, vista:true},
+    estado:{granularidad:'mes', mesesAtras:12, comparacion:'total', vista:'linea', tipoAtencion:'', kpiFiltro:''} },
+
+  { id:'altovalor', seccion:'alto', titulo:'Clientes Alto Valor',
+    desc:'Medios de ingreso de mayor valor, según la sede seleccionada.',
+    col:'col-12', tipo:'serie', serieCampo:x=>x.medio,
+    ventanaFija:'12m', etiquetas:true, contadorMeses:true,
+    seriesPorSede:true,   // filtra qué medios se muestran según la sede activa
+    matrizVinculada:'matrizalto',  // la tabla de abajo filtra esta gráfica al hacer clic
+    controles:{granularidad:true, tipo:true, vista:true},
+    estado:{granularidad:'mes', ventana:'12m', comparacion:'serie', mesesAtras:12, vista:'linea', tipoAtencion:'', medioSel:'__total__', anioForzado:'2026'} },
+
+  { id:'matrizalto', seccion:'alto', titulo:'Clientes Alto Valor detalle por medio de matriz',
+    desc:'Medios principales (911, propios medios, Emergency Time y Ambulancias RedesImat) por mes.',
+    col:'col-12', tipo:'matriz', medioSet:'alto',
+    soloSede:['Tulua','Buga','Zarzal','Cerrito'], graficaVinculada:'altovalor',
+    controles:{},
+    estado:{anioSel:'2026', topSel:0} },
+
+  { id:'bajovolumen', seccion:'bajo', titulo:'Clientes Bajo Volumen',
+    desc:'Tendencia mensual de los medios de bajo volumen (remisiones externas).',
+    col:'col-12', tipo:'serie', serieCampo:x=>x.medio,
+    ventanaFija:'12m', etiquetas:true, contadorMeses:true,
+    medioSetSerie:'bajo',   // muestra solo medios de bajo volumen
+    matrizVinculada:'matrizremis',
+    soloSede:['Tulua','Buga'],
+    controles:{granularidad:true, tipo:true, vista:true},
+    estado:{granularidad:'mes', ventana:'12m', comparacion:'serie', mesesAtras:12, vista:'linea', tipoAtencion:'', medioSel:'__total__', anioForzado:'2026'} },
+
+  { id:'matrizremis', seccion:'bajo', titulo:'Clientes Bajo Volumen — detalle por medio (matriz)',
+    desc:'Atenciones en urgencias medios de ingreso (excluye 911, propios medios, Emergency Time, reconsulta y RedesImat).',
+    col:'col-12', tipo:'matriz', medioSet:'bajo',
+    soloSede:['Tulua','Buga'], graficaVinculada:'bajovolumen',
+    controles:{},
+    estado:{anioSel:'2026', topSel:0} },
+
+  { id:'arlgrafica', seccion:'arl', titulo:'Clientes ARL Urgencias',
+    desc:'Tendencia mensual de atenciones por entidad ARL (riesgos laborales).',
+    col:'col-12', tipo:'serie',
+    campoSerie:'arl',   // agrupa por entidad ARL
+    ventanaFija:'12m', etiquetas:true, contadorMeses:true,
+    matrizVinculada:'matrizarl',
+    soloSede:['Tulua','Buga'],
+    controles:{granularidad:true, vista:true},
+    estado:{granularidad:'mes', ventana:'12m', comparacion:'serie', mesesAtras:12, vista:'linea', medioSel:'__total__', anioForzado:'2026'} },
+
+  { id:'matrizarl', seccion:'arl', titulo:'Clientes ARL Urgencias — detalle por entidad (matriz)',
+    desc:'Atenciones de urgencias por entidad ARL, por mes (solo registros marcados como ARL).',
+    col:'col-12', tipo:'matriz', campoMatriz:'arl',
+    soloSede:['Tulua','Buga'], graficaVinculada:'arlgrafica',
+    controles:{},
+    estado:{anioSel:'2026', topSel:0} },
+
+  { id:'particulargrafica', seccion:'ppp', titulo:'Clientes Particulares, Prepagadas y Planes Complementarios',
+    desc:'Tendencia mensual de atenciones de pacientes particulares, medicina prepagada y planes complementarios.',
+    col:'col-12', tipo:'serie',
+    campoSerie:'particular',
+    ventanaFija:'12m', etiquetas:true, contadorMeses:true,
+    matrizVinculada:'matrizparticular',
+    soloSede:['Tulua','Buga'],
+    controles:{granularidad:true, vista:true},
+    estado:{granularidad:'mes', ventana:'12m', comparacion:'serie', mesesAtras:12, vista:'linea', medioSel:'__total__', anioForzado:'2026'} },
+
+  { id:'matrizparticular', seccion:'ppp', titulo:'Clientes Particulares, Prepagadas y Planes Complementarios — detalle (matriz)',
+    desc:'Atenciones por entidad (particular, prepagada, plan complementario), por mes.',
+    col:'col-12', tipo:'matriz', campoMatriz:'particular',
+    soloSede:['Tulua','Buga'], graficaVinculada:'particulargrafica',
+    controles:{},
+    estado:{anioSel:'2026', topSel:0} },
+
+  { id:'polizagrafica', seccion:'poliza', titulo:'Clientes Pólizas Estudiantiles',
+    desc:'Tendencia mensual de atenciones por pólizas estudiantiles y de salud.',
+    col:'col-12', tipo:'serie',
+    campoSerie:'poliza',
+    ventanaFija:'12m', etiquetas:true, contadorMeses:true,
+    matrizVinculada:'matrizpoliza',
+    soloSede:['Tulua','Buga'],
+    controles:{granularidad:true, vista:true},
+    estado:{granularidad:'mes', ventana:'12m', comparacion:'serie', mesesAtras:12, vista:'linea', medioSel:'__total__', anioForzado:'2026'} },
+
+  { id:'matrizpoliza', seccion:'poliza', titulo:'Clientes Pólizas Estudiantiles — detalle por entidad (matriz)',
+    desc:'Atenciones por entidad de póliza estudiantil/salud, por mes (excluye SOAT y ARL).',
+    col:'col-12', tipo:'matriz', campoMatriz:'poliza',
+    soloSede:['Tulua','Buga'], graficaVinculada:'polizagrafica',
+    controles:{},
+    estado:{anioSel:'2026', topSel:0} },
+
+  { id:'mapavalle', seccion:'geo', titulo:'Procedencia geográfica — Valle del Cauca',
+    desc:'Municipio de procedencia de los pacientes. Selecciona año y mes para ver la distribución.',
+    col:'col-12', tipo:'mapa',
+    soloSede:['Tulua','Buga','Zarzal','Cerrito'],
+    controles:{},
+    estado:{anioSel:'', mesSel:'', tipoSel:''} },
+
+  { id:'matrizmapa', seccion:'geo', titulo:'Procedencia geográfica — detalle por municipio (matriz)',
+    desc:'Atenciones por municipio del Valle, por mes (lo que no es del Valle se agrupa en "Otros").',
+    col:'col-12', tipo:'matriz', campoMatriz:'muniValle',
+    soloSede:['Tulua','Buga','Zarzal','Cerrito'], graficaVinculada:'mapavalle',
+    controles:{},
+    estado:{anioSel:'', topSel:0, tipoFiltro:''} },
+
+  { id:'hora', seccion:'otros', titulo:'Demanda por hora del día',
+    desc:'Identifica los picos de ingreso a urgencias.',
+    col:'col-12', tipo:'hora',
+    controles:{filtroAnio:true, filtroMes:true, tipo:true},
+    estado:{comparacion:'total', vista:'barra', anios:[], meses:[], tipoAtencion:''} },
+
+  { id:'medicos', seccion:'otros', titulo:'Productividad por médico',
+    desc:'Médicos por número de atenciones (nombres unificados).',
+    col:'col-6', tipo:'ranking', campo:x=>x.medico,
+    excluir:v=>!v || v==='(No médico / otros)',
+    vistaFija:'barra',
+    controles:{filtroAnio:true, filtroMes:true, top:true},
+    estado:{vista:'barra', top:12, anios:[], meses:[]} },
+];
+
+/* ----------------------------------------------------------------------------
+   Construcción del HTML de cada panel (controles + lienzo + tabla lateral)
+---------------------------------------------------------------------------- */
+// Genera el HTML de un panel individual según su tipo
+function htmlPanel(p){
+  // Panel tipo mapa: SVG del Valle + selectores año/mes
+  if(p.tipo==='mapa'){
+    return `
+      <div class="panel ${p.col}" id="panel_${p.id}">
+        <div class="matriz-cab">
+          <div>
+            <h3>${p.titulo}</h3>
+            <p class="desc">${p.desc}</p>
+          </div>
+        </div>
+        <div class="panel-controles">
+          <div class="ctrl-grupo" id="mapAnio_${p.id}"><span class="et">Año</span></div>
+          <div class="ctrl-grupo" id="mapMes_${p.id}"><span class="et">Mes</span></div>
+          <div class="ctrl-grupo" id="mapTipo_${p.id}"><span class="et">Tipo</span></div>
+        </div>
+        <div class="mapa-cuerpo">
+          <div class="mapa-svg" id="mapasvg_${p.id}"></div>
+          <div class="mapa-lateral">
+            <div class="mapa-leyenda" id="mapaleyenda_${p.id}"></div>
+            <div class="mapa-rank" id="maparank_${p.id}"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+  // Panel tipo matriz: tabla ancha con scroll
+  if(p.tipo==='matriz'){
+    return `
+      <div class="panel ${p.col}" id="panel_${p.id}">
+        <div class="matriz-cab">
+          <div>
+            <h3>${p.titulo}</h3>
+            <p class="desc" id="desc_${p.id}">${p.desc}</p>
+          </div>
+          <button class="btn-csv" data-csv="${p.id}">CSV ↓</button>
+        </div>
+        <div class="panel-controles" id="ctrlmatriz_${p.id}">
+          <div class="ctrl-grupo" id="mAnio_${p.id}"><span class="et">Año</span></div>
+          <div class="ctrl-grupo" id="mTop_${p.id}"><span class="et">Top</span></div>
+        </div>
+        <div class="matriz-wrap" id="tab_${p.id}"></div>
+      </div>`;
+  }
+  // Panel tipo serie / ranking / hora
+  const ctrl = construirControles(p);
+  const indicadorFiltro = p.matrizVinculada
+    ? `<span class="filtro-medio hidden" id="filtromedio_${p.id}">
+         <span class="fm-txt"></span>
+         <button class="fm-todos" data-vertodos="${p.id}">✕ Ver todos</button>
+       </span>` : '';
+  return `
+    <div class="panel ${p.col}" id="panel_${p.id}">
+      <div class="serie-cab">
+        <div>
+          <h3>${p.titulo}</h3>
+          <p class="desc">${p.desc}</p>
+        </div>
+        ${indicadorFiltro}
+      </div>
+      ${ctrl}
+      <div class="panel-cuerpo" id="cuerpo_${p.id}">
+        <div class="lienzo alto"><canvas id="ch_${p.id}"></canvas></div>
+        <div class="tabla-val">
+          <div class="cab">
+            <span>Datos</span>
+            <span class="total" id="tot_${p.id}"></span>
+            <button class="btn-csv" data-csv="${p.id}">CSV ↓</button>
+          </div>
+          <div class="cuerpo" id="tab_${p.id}"></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function construirPaneles(){
+  const cont = document.getElementById('rejillaPaneles');
+  // construir cada sección colapsable con sus paneles
+  cont.innerHTML = SECCIONES.map(sec=>{
+    const panelesSec = PANELES.filter(p=>p.seccion===sec.id);
+    // la sección "general" incluye el selector de periodo + las tarjetas KPI
+    const kpisHTML = sec.kpis
+      ? `<div class="kpi-selector" id="kpiSelector"></div>
+         <div class="kpis" id="kpis"></div>` : '';
+    const panelesHTML = panelesSec.map(htmlPanel).join('');
+    return `
+      <section class="acordeon abierta" id="sec_${sec.id}">
+        <button class="acordeon-cab" data-sec="${sec.id}">
+          <span class="acordeon-tit">${sec.titulo}</span>
+          <span class="acordeon-flecha">▾</span>
+        </button>
+        <div class="acordeon-cuerpo">
+          ${kpisHTML}
+          <div class="rejilla">${panelesHTML}</div>
+        </div>
+      </section>`;
+  }).join('');
+
+  // enlazar controles
+  PANELES.forEach(enlazarControles);
+  PANELES.forEach(poblarFiltrosPanel);
+  // botones CSV
+  cont.querySelectorAll('.btn-csv').forEach(b=>{
+    b.addEventListener('click', ()=>exportarCSV(b.dataset.csv));
+  });
+  // botón "Ver todos" de las gráficas vinculadas
+  cont.querySelectorAll('.fm-todos').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const grafica = PANELES.find(p=>p.id===b.dataset.vertodos);
+      if(grafica){ grafica.estado.medioSel=''; dibujarPanel(grafica); marcarFilaMatriz(grafica); }
+    });
+  });
+  // toggle de secciones (desplegar/recoger)
+  cont.querySelectorAll('.acordeon-cab').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      b.closest('.acordeon').classList.toggle('abierta');
+    });
+  });
+}
+
+// Aplica el medio seleccionado (clic en la matriz) a su gráfica vinculada
+function seleccionarMedioMatriz(panelMatriz, nombreMedio){
+  const grafica = PANELES.find(p=>p.id===panelMatriz.graficaVinculada);
+  if(!grafica) return;
+  // toggle: si ya estaba seleccionado, se quita
+  grafica.estado.medioSel = (grafica.estado.medioSel===nombreMedio) ? '' : nombreMedio;
+  dibujarPanel(grafica);
+  marcarFilaMatriz(grafica);
+}
+
+// Actualiza el indicador "filtrando por X" + resalta la fila activa en la matriz
+function marcarFilaMatriz(grafica){
+  const sel = grafica.estado.medioSel;
+  const etiqueta = sel==='__total__' ? 'Total general' : sel;
+  const ind = document.getElementById('filtromedio_'+grafica.id);
+  if(ind){
+    if(sel){
+      ind.classList.remove('hidden');
+      ind.querySelector('.fm-txt').textContent = 'Mostrando: '+etiqueta;
+    } else {
+      ind.classList.add('hidden');
+    }
+  }
+  // resaltar fila en la matriz vinculada (compara por data-medio, no por texto)
+  const panelMatriz = PANELES.find(p=>p.graficaVinculada===grafica.id);
+  if(panelMatriz){
+    document.querySelectorAll('#tab_'+panelMatriz.id+' td.medio').forEach(td=>{
+      td.classList.toggle('fila-sel', td.dataset.medio===sel);
+    });
+  }
+}
+
+function construirControles(p){
+  const c = p.controles, e = p.estado;
+  let g = '';
+  if(c.granularidad){
+    g += grupo('Agrupar', p.id, 'granularidad', [['mes','Mes'],['anio','Año']], e.granularidad);
+  }
+  if(c.ventana){
+    g += grupo('Ventana', p.id, 'ventana', [['12m','12 meses'],['todo','Todo']], e.ventana);
+  }
+  if(c.comparacion){
+    g += grupo('Comparar', p.id, 'comparacion', [['total','Total'],['clinica','Clínica'],['sede','Sede']], e.comparacion);
+  }
+  if(c.vista){
+    g += grupo('Vista', p.id, 'vista', [['linea','Línea'],['barra','Barras'],['poligono','Polígono']], e.vista);
+  }
+  if(c.tipo){
+    g += grupo('Tipo', p.id, 'tipoAtencion', [['','Todos'],['SOAT','SOAT'],['OTROS','OTROS']], e.tipoAtencion);
+  }
+  // Contador de meses hacia atrás (input + botones -/+). Solo visible en granularidad "Mes".
+  if(p.contadorMeses){
+    const dis = e.granularidad==='anio' ? 'disabled' : '';
+    g += `<div class="ctrl-grupo contador-meses ${dis?'atenuado':''}" id="cmeses_${p.id}">
+            <span class="et">Meses atrás</span>
+            <button class="cm-btn" data-cm="${p.id}" data-delta="-1" ${dis}>−</button>
+            <input class="cm-input" id="cminput_${p.id}" type="number" min="1" max="120" value="${e.mesesAtras||12}" ${dis}>
+            <button class="cm-btn" data-cm="${p.id}" data-delta="1" ${dis}>+</button>
+          </div>`;
+  }
+  if(c.top){
+    g += grupo('Top', p.id, 'top', [[8,'8'],[12,'12'],[20,'20']], e.top);
+  }
+  // --- Filtros multi-selección (se llenan con datos reales en poblarFiltrosPanel) ---
+  if(c.filtroMunicipio){
+    g += `<div class="ctrl-grupo ctrl-multi" id="fm_${p.id}_municipio"><span class="et">Municipio</span></div>`;
+  }
+  if(c.filtroAnio){
+    g += `<div class="ctrl-grupo ctrl-multi" id="fm_${p.id}_anio"><span class="et">Año</span></div>`;
+  }
+  if(c.filtroMes){
+    g += `<div class="ctrl-grupo ctrl-multi" id="fm_${p.id}_mes"><span class="et">Mes</span></div>`;
+  }
+  return `<div class="panel-controles">${g}</div>`;
+}
+function grupo(etiqueta, panelId, clave, opciones, activo){
+  const btns = opciones.map(([val,txt])=>
+    `<button class="cbtn ${String(activo)===String(val)?'on':''}" data-panel="${panelId}" data-clave="${clave}" data-val="${val}">${txt}</button>`
+  ).join('');
+  return `<div class="ctrl-grupo"><span class="et">${etiqueta}</span>${btns}</div>`;
+}
+
+// Rellena los filtros multi-selección de un panel con los valores presentes en los datos
+function poblarFiltrosPanel(p){
+  const d = datosContexto();
+  const c = p.controles;
+  if(c.filtroAnio){
+    const anios = [...new Set(d.map(x=>x.fecha.slice(0,4)))].sort();
+    pintarMulti('fm_'+p.id+'_anio', p, 'anios', [['','Todos'], ...anios.map(a=>[a,a])]);
+  }
+  if(c.filtroMes){
+    pintarMulti('fm_'+p.id+'_mes', p, 'meses', [['','Todos'], ...MESES_CORTO.map((m,i)=>[String(i+1).padStart(2,'0'), m])]);
+  }
+  if(c.filtroMunicipio){
+    const munis = [...new Set(d.map(x=>x.municipio).filter(Boolean))];
+    const conteo = contar(d, x=>x.municipio);
+    munis.sort((a,b)=>(conteo[b]||0)-(conteo[a]||0)); // por frecuencia
+    pintarMulti('fm_'+p.id+'_municipio', p, 'municipios', [['','Todos'], ...munis.map(m=>[m,m])]);
+  }
+}
+
+// Pinta un grupo de botones tipo toggle múltiple
+function pintarMulti(idContenedor, p, claveArray, opciones){
+  const cont = document.getElementById(idContenedor);
+  if(!cont) return;
+  const et = cont.querySelector('.et');
+  const etTxt = et ? et.textContent : '';
+  const sel = p.estado[claveArray] || [];
+  let html = `<span class="et">${etTxt}</span>`;
+  html += opciones.map(([val,txt])=>{
+    if(val===''){ // botón "Todos" activo cuando no hay selección
+      const on = sel.length===0;
+      return `<button class="cbtn ${on?'on':''}" data-multi="${idContenedor}" data-clave="${claveArray}" data-val="">${txt}</button>`;
+    }
+    const on = sel.includes(val);
+    return `<button class="cbtn ${on?'on':''}" data-multi="${idContenedor}" data-clave="${claveArray}" data-val="${val}">${txt}</button>`;
+  }).join('');
+  cont.innerHTML = html;
+  // enlazar
+  cont.querySelectorAll('.cbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const val = b.dataset.val;
+      if(val===''){
+        p.estado[claveArray] = [];           // "Todos" limpia la selección
+      } else {
+        const arr = p.estado[claveArray];
+        const i = arr.indexOf(val);
+        if(i>=0) arr.splice(i,1); else arr.push(val);
+      }
+      // repintar este grupo y redibujar
+      pintarMulti(idContenedor, p, claveArray, opciones);
+      dibujarPanel(p);
+    });
+  });
+}
+
+function enlazarControles(p){
+  document.querySelectorAll(`.cbtn[data-panel="${p.id}"]`).forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const clave=b.dataset.clave;
+      let val=b.dataset.val;
+      if(clave==='top') val=parseInt(val);
+      p.estado[clave]=val;
+      document.querySelectorAll(`.cbtn[data-panel="${p.id}"][data-clave="${clave}"]`).forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      dibujarPanel(p);
+      // si cambió la granularidad y hay contador de meses, refrescar su estado habilitado
+      if(clave==='granularidad' && p.contadorMeses){ construirPaneles(); dibujarPanel(p); }
+    });
+  });
+  // contador de meses: botones -/+ e input
+  if(p.contadorMeses){
+    const input = document.getElementById('cminput_'+p.id);
+    const aplicar = (n)=>{
+      n = Math.min(120, Math.max(1, n||12));
+      p.estado.mesesAtras = n;
+      if(input) input.value = n;
+      dibujarPanel(p);
+    };
+    document.querySelectorAll(`.cm-btn[data-cm="${p.id}"]`).forEach(b=>{
+      b.addEventListener('click', ()=> aplicar((p.estado.mesesAtras||12) + parseInt(b.dataset.delta)) );
+    });
+    if(input){
+      input.addEventListener('change', ()=> aplicar(parseInt(input.value)) );
+    }
+  }
+}
+
+// Aplica los filtros multi (año/mes/municipio) propios de un panel a su conjunto de datos
+function aplicarFiltrosPanel(p, d){
+  const e = p.estado;
+  return d.filter(x=>{
+    if(e.tipoAtencion && x.tipo!==e.tipoAtencion) return false;
+    if(e.anios && e.anios.length && !e.anios.includes(x.fecha.slice(0,4))) return false;
+    if(e.meses && e.meses.length && !e.meses.includes(x.fecha.slice(5,7))) return false;
+    if(e.municipios && e.municipios.length && !e.municipios.includes(x.municipio)) return false;
+    return true;
+  });
+}
+
+/* ----------------------------------------------------------------------------
+   Utilidades de agregación temporal
+---------------------------------------------------------------------------- */
+function claveTiempo(fechaISO, granularidad){
+  return granularidad==='anio' ? fechaISO.slice(0,4) : fechaISO.slice(0,7); // YYYY o YYYY-MM
+}
+function etiquetaTiempo(clave, granularidad){
+  if(granularidad==='anio') return clave;
+  const [y,m]=clave.split('-');
+  return `${MESES_CORTO[parseInt(m)-1]} ${y.slice(2)}`;
+}
+// limita a los últimos N meses si ventana='12m'
+function aplicarVentana(claves, granularidad, ventana){
+  if(ventana==='todo') return claves;
+  const n = granularidad==='anio' ? 5 : 12;
+  return claves.slice(-n);
+}
+// agrupa por serie de comparación (total / clinica / sede / campo propio)
+function grupoSerie(p, d){
+  if(p.campoSerie) return {modo:'campoLibre', fn:x=>x[p.campoSerie], campo:p.campoSerie};
+  if(p.serieCampo) return {modo:'campo', fn:p.serieCampo};
+  const cmp = p.estado.comparacion;
+  if(cmp==='clinica') return {modo:'clinica', fn:x=>x.clinica};
+  if(cmp==='sede') return {modo:'sede', fn:x=>x.sede};
+  return {modo:'total', fn:()=>'Total'};
+}
+
+/* ----------------------------------------------------------------------------
+   Dibujar un panel según su tipo y estado
+---------------------------------------------------------------------------- */
+function dibujarPanel(p){
+  // visibilidad por sede: paneles con soloSede solo aparecen en esa(s) sede(s)
+  const panelEl = document.getElementById('panel_'+p.id);
+  if(p.soloSede){
+    const sedes = Array.isArray(p.soloSede) ? p.soloSede : [p.soloSede];
+    const visible = contexto.vista==='sede' && sedes.includes(contexto.sede);
+    if(panelEl) panelEl.style.display = visible ? '' : 'none';
+    if(!visible) return;
+  } else {
+    if(panelEl) panelEl.style.display = '';
+  }
+  let d = aplicarFiltros();              // contexto (clínica/sede de la barra lateral)
+  d = aplicarFiltrosPanel(p, d);         // filtros propios del panel (año/mes/municipio)
+  if(p.tipo==='serie')   dibujarSerie(p, d);
+  if(p.tipo==='ranking') dibujarRanking(p, d);
+  if(p.tipo==='hora')    dibujarHora(p, d);
+  if(p.tipo==='matriz')  dibujarMatriz(p, d);
+  if(p.tipo==='mapa')    dibujarMapa(p, d);
+}
+
+// ---- Series temporales ----
+// Reglas de "Clientes Alto Valor": qué medios de ingreso se muestran por sede.
+// Los nombres deben coincidir con la salida de normMedio().
+const ALTOVALOR_POR_SEDE = {
+  'Tulua':   ['911','Emergency Time','Propios medios','Ambulancias RedesImat'],
+  'Zarzal':  ['911','Emergency Time','Propios medios','Ambulancias RedesImat'],
+  'Buga':    ['Propios medios','RedesImat'],
+  'Cerrito': ['911','Emergency Time','Propios medios','Ambulancias RedesImat'],
+};
+function mediosPorSede(d){
+  const sede = contexto.sede;  // sede activa de la barra lateral
+  // usamos el nombre de la matriz (medioMatriz.nombre) para ser consistentes con la gráfica
+  const nombreDe = x => x.medioMatriz ? x.medioMatriz.nombre : x.medio;
+  if(sede && ALTOVALOR_POR_SEDE[sede]){
+    const presentes = new Set(d.map(nombreDe));
+    return ALTOVALOR_POR_SEDE[sede].filter(m=>presentes.has(m));
+  }
+  // Zarzal, Cerrito o vista general -> todos los medios presentes, ordenados por frecuencia
+  const tot = contar(d, nombreDe);
+  return Object.entries(tot).sort((a,b)=>b[1]-a[1]).map(t=>t[0]);
+}
+
+function dibujarSerie(p, d){
+  const g = p.estado.granularidad;
+  const ventana = p.estado.ventana;
+  const sel = grupoSerie(p, d);
+
+  // filtro por tarjeta KPI (solo la gráfica de tendencia lo usa)
+  if(p.estado.kpiFiltro){
+    const f = p.estado.kpiFiltro;
+    const filtros = {
+      'todas':      x=>true,
+      'soat':       x=>x.tipo==='SOAT',
+      'soat_nuevas':x=>x.tipo==='SOAT' && x.medio!=='Reconsulta',
+      'soat_recon': x=>x.tipo==='SOAT' && x.medio==='Reconsulta',
+      'otros':      x=>x.tipo!=='SOAT',
+      'otros_arl':  x=>x.tipo!=='SOAT' && x.arl,
+      'otros_ppp':  x=>x.tipo!=='SOAT' && x.particular,
+      'otros_poliza':x=>x.tipo!=='SOAT' && x.poliza,
+    };
+    if(filtros[f]) d = d.filter(filtros[f]);
+  }
+
+  // si una matriz vinculada fijó un año, filtramos los datos a ese año
+  if(p.estado.anioForzado){
+    d = d.filter(x=> x.fecha.slice(0,4)===p.estado.anioForzado);
+  }
+
+  // todas las claves de tiempo presentes
+  let claves = [...new Set(d.map(x=>claveTiempo(x.fecha, g)))].sort();
+  // ventana: si hay año forzado se muestran todos sus meses; si hay contador de meses,
+  // se muestran los últimos N; si no, la ventana fija tradicional.
+  if(p.estado.anioForzado){
+    // sin recorte adicional (ya filtrado por año)
+  } else if(p.contadorMeses && g==='mes'){
+    const n = Math.max(1, p.estado.mesesAtras||12);
+    claves = claves.slice(-n);
+  } else {
+    claves = aplicarVentana(claves, g, ventana);
+  }
+  const setClaves = new Set(claves);
+
+  // determinación de series
+  let series;
+  const esTotal = p.estado.medioSel==='__total__';
+  if(esTotal){
+    series = ['Total general'];   // una sola línea con la suma de todo el conjunto
+  } else if(sel.modo==='campoLibre'){
+    if(p.estado.medioSel){
+      series = [p.estado.medioSel];   // una entidad seleccionada desde la matriz
+    } else {
+      const dC = d.filter(x=>x[sel.campo]);
+      const tot = contar(dC, x=>x[sel.campo]);
+      series = Object.entries(tot).sort((a,b)=>b[1]-a[1]).map(t=>t[0]);
+    }
+  } else if(sel.modo==='campo'){
+    if(p.estado.medioSel){
+      // un medio seleccionado desde la matriz -> solo esa línea
+      series = [p.estado.medioSel];
+    } else if(p.medioSetSerie){
+      // gráfica de bajo volumen: solo medios de ese set, ordenados por frecuencia
+      const dSet = d.filter(x=> x.medioMatriz && x.medioMatriz.set===p.medioSetSerie);
+      const tot = contar(dSet, x=>x.medioMatriz.nombre);
+      series = Object.entries(tot).sort((a,b)=>b[1]-a[1]).map(t=>t[0]);
+    } else if(p.seriesPorSede){
+      // "Clientes Alto Valor": qué medios se muestran depende de la sede activa
+      series = mediosPorSede(d);
+    } else {
+      const tot = contar(d, sel.fn);
+      series = topN(tot, 5).map(t=>t[0]);
+    }
+  } else if(sel.modo==='clinica'){
+    series = [...new Set(d.map(x=>x.clinica))].sort();
+  } else if(sel.modo==='sede'){
+    series = [...new Set(d.map(x=>x.sede))].sort();
+  } else {
+    series = ['Total'];
+  }
+
+  // función que decide si un registro pertenece al conjunto del panel (para el "Total general")
+  const perteneceAlConjunto = (x)=>{
+    if(sel.modo==='campoLibre') return !!x[sel.campo];               // arl / particular / poliza
+    if(p.medioSetSerie) return x.medioMatriz && x.medioMatriz.set===p.medioSetSerie;  // bajo volumen
+    if(p.seriesPorSede){                                             // alto valor: medios visibles de la sede
+      const visibles = mediosPorSede(d);
+      return x.medioMatriz && visibles.includes(x.medioMatriz.nombre);
+    }
+    return true;
+  };
+
+  // función de agrupación de serie
+  const usarNombreMatriz = p.medioSetSerie || p.seriesPorSede || (p.estado.medioSel && sel.modo==='campo' && !esTotal);
+  let fnSerie;
+  if(esTotal) fnSerie = x=> perteneceAlConjunto(x) ? 'Total general' : null;
+  else if(sel.modo==='campoLibre') fnSerie = x=>x[sel.campo];
+  else if(usarNombreMatriz) fnSerie = x=> x.medioMatriz ? x.medioMatriz.nombre : null;
+  else fnSerie = sel.fn;
+
+  // matriz serie -> clave -> conteo
+  const m = {};
+  series.forEach(s=>{ m[s]={}; claves.forEach(k=>m[s][k]=0); });
+  d.forEach(x=>{
+    const k = claveTiempo(x.fecha, g);
+    if(!setClaves.has(k)) return;
+    const s = fnSerie(x);
+    if(s!==null && m[s] && k in m[s]) m[s][k]++;
+  });
+
+  const colorDe = (s,i)=>{
+    if(sel.modo==='clinica') return s==='Dolormed'?C.verde : s==='RedesImat'?C.redes : C.gris;
+    return C.paleta[i%C.paleta.length];
+  };
+  const vista = p.estado.vista;
+  const esBarra = vista==='barra';
+  const esPoligono = vista==='poligono';
+  const datasets = series.map((s,i)=>({
+    label:s, data:claves.map(k=>m[s][k]),
+    borderColor:colorDe(s,i),
+    backgroundColor: esBarra ? colorDe(s,i) : (!esPoligono && series.length===1? C.verdeT : 'transparent'),
+    fill: !esBarra && !esPoligono && series.length===1,
+    // polígono de frecuencia: líneas rectas (sin curvar), puntos marcados, sin relleno
+    tension: esPoligono ? 0 : .3,
+    borderWidth:2.4,
+    pointRadius: esPoligono ? 4 : 2,
+    pointHoverRadius:6,
+    pointBackgroundColor: esPoligono ? colorDe(s,i) : undefined,
+    borderRadius: esBarra?5:0,
+  }));
+
+  // etiquetas de datos (cantidades) — activas en paneles marcados con etiquetas:true
+  const datalabels = p.etiquetas ? {
+    display: (ctx)=> ctx.dataset.data[ctx.dataIndex] > 0,  // omite ceros
+    anchor:'end', align:'top', offset: esBarra?2:4,
+    color: C.azul, font:{ size:9, weight:'700' },
+    formatter:(v)=> v.toLocaleString('es-CO'),
+  } : { display:false };
+
+  // Eje Y: por defecto desde cero; si ejeDesdeMin, arranca en el valor más bajo de la tabla
+  let yScale = { beginAtZero:true, grid:{color:'#EEF1F5'} };
+  if(p.ejeDesdeMin){
+    const totalesPorClave = claves.map(k=> series.reduce((a,s)=>a+m[s][k],0)).filter(v=>v>0);
+    if(totalesPorClave.length){
+      const minV = Math.min(...totalesPorClave);
+      const maxV = Math.max(...totalesPorClave);
+      const margen = Math.max(1, Math.round((maxV-minV)*0.15));
+      yScale = { beginAtZero:false, min: Math.max(0, minV-margen), grid:{color:'#EEF1F5'} };
+    }
+  }
+
+  destruir('ch_'+p.id);
+  charts['ch_'+p.id] = new Chart(document.getElementById('ch_'+p.id),{
+    type: esBarra?'bar':'line',
+    data:{ labels:claves.map(k=>etiquetaTiempo(k,g)), datasets },
+    options:{ responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top: p.etiquetas?18:0 } },
+      plugins:{
+        legend:{ display:series.length>1, position:'bottom', labels:{usePointStyle:true,padding:12,boxWidth:8} },
+        datalabels
+      },
+      scales:{ y:yScale, x:{grid:{display:false}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:14}} }
+    }
+  });
+
+  // Tabla lateral (si el panel no la oculta)
+  if(p.sinTabla){ ocultarTabla(p.id); return; }
+  const filas = claves.map(k=>{
+    const tot = series.reduce((a,s)=>a+m[s][k],0);
+    return [etiquetaTiempo(k,g), tot];
+  });
+  const totalGeneral = filas.reduce((a,f)=>a+f[1],0);
+  if(p.tablaVariacion){
+    pintarTablaVariacion(p.id, filas, totalGeneral);
+  } else {
+    pintarTabla(p.id, filas, totalGeneral);
+  }
+}
+
+// ---- Ranking de categorías ----
+function dibujarRanking(p, d){
+  let datos = d;
+  let m = contar(datos.filter(x=>!(p.excluir && p.excluir(p.campo(x)))), p.campo);
+  const top = topN(m, p.estado.top);
+  const esBarra = p.estado.vista==='barra';
+
+  destruir('ch_'+p.id);
+  charts['ch_'+p.id] = new Chart(document.getElementById('ch_'+p.id),{
+    type: esBarra?'bar':'line',
+    data:{ labels:top.map(t=>t[0]),
+      datasets:[{ label:'Atenciones', data:top.map(t=>t[1]),
+        backgroundColor: esBarra ? top.map((_,i)=>C.paleta[i%C.paleta.length]) : C.verdeT,
+        borderColor:C.azul, borderWidth: esBarra?0:2.4, borderRadius:5,
+        fill: !esBarra, tension:.3, pointRadius:3, pointBackgroundColor:C.verde }]},
+    options:{ indexAxis: esBarra?'y':'x', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales: esBarra
+        ? { x:{beginAtZero:true,grid:{color:'#EEF1F5'}}, y:{grid:{display:false}} }
+        : { y:{beginAtZero:true,grid:{color:'#EEF1F5'}}, x:{grid:{display:false},ticks:{maxRotation:40,minRotation:0,autoSkip:false}} }
+    }
+  });
+
+  const totalGeneral = Object.values(m).reduce((a,b)=>a+b,0);
+  pintarTabla(p.id, top, totalGeneral);
+}
+
+// ---- Distribución por hora ----
+function dibujarHora(p, d){
+  const cmp = p.estado.comparacion;
+  let series, fn;
+  if(cmp==='clinica'){ series=[...new Set(d.map(x=>x.clinica))].sort(); fn=x=>x.clinica; }
+  else if(cmp==='sede'){ series=[...new Set(d.map(x=>x.sede))].sort(); fn=x=>x.sede; }
+  else { series=['Total']; fn=()=>'Total'; }
+
+  const m = {}; series.forEach(s=>m[s]=Array(24).fill(0));
+  d.forEach(x=>{ if(x.hora!==null && x.hora>=0 && x.hora<24){ const s=fn(x); if(m[s]) m[s][x.hora]++; } });
+
+  const colorDe=(s,i)=> cmp==='clinica' ? (s==='Dolormed'?C.verde:s==='RedesImat'?C.redes:C.gris) : C.paleta[i%C.paleta.length];
+  const esBarra = p.estado.vista==='barra';
+  const datasets = series.map((s,i)=>({
+    label:s, data:m[s],
+    backgroundColor: esBarra? colorDe(s,i) : (series.length===1?C.azulT:'transparent'),
+    borderColor: colorDe(s,i), borderWidth:2.2, borderRadius:4,
+    fill: !esBarra && series.length===1, tension:.3, pointRadius:1.5, pointHoverRadius:4,
+  }));
+
+  destruir('ch_'+p.id);
+  charts['ch_'+p.id] = new Chart(document.getElementById('ch_'+p.id),{
+    type: esBarra?'bar':'line',
+    data:{ labels:Array.from({length:24},(_,h)=>`${String(h).padStart(2,'0')}h`), datasets },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:series.length>1, position:'bottom', labels:{usePointStyle:true,padding:12,boxWidth:8} } },
+      scales:{ y:{beginAtZero:true,grid:{color:'#EEF1F5'}}, x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:12}} }
+    }
+  });
+
+  // tabla: hora -> total
+  const filas = Array.from({length:24},(_,h)=>{
+    const tot = series.reduce((a,s)=>a+m[s][h],0);
+    return [`${String(h).padStart(2,'0')}:00`, tot];
+  }).filter(f=>f[1]>0);
+  const totalGeneral = filas.reduce((a,f)=>a+f[1],0);
+  pintarTabla(p.id, filas, totalGeneral);
+}
+
+// ---- Tabla matriz: medios (filas) x meses (columnas), agrupado por año ----
+let matrizDatos = {};  // para exportar CSV
+// ---- Mapa coroplético del Valle del Cauca ----
+function dibujarMapa(p, d){
+  // selectores año/mes
+  const aniosDisp = [...new Set(d.filter(x=>x.muniValle).map(x=>x.fecha.slice(0,4)))].sort();
+  pintarSelectorMapa('mapAnio_'+p.id, p, 'anioSel', [['','Todos'], ...aniosDisp.map(a=>[a,a])], ()=>dibujarMapa(p,d));
+  // meses disponibles según año elegido
+  const dAnio = d.filter(x=> !p.estado.anioSel || x.fecha.slice(0,4)===p.estado.anioSel);
+  const mesesDisp = [...new Set(dAnio.filter(x=>x.muniValle).map(x=>x.fecha.slice(5,7)))].sort();
+  pintarSelectorMapa('mapMes_'+p.id, p, 'mesSel', [['','Todos'], ...mesesDisp.map(m=>[m, MESES_CORTO[parseInt(m)-1]])], ()=>dibujarMapa(p,d));
+  // selector de tipo (Todos / SOAT / OTROS)
+  pintarSelectorMapa('mapTipo_'+p.id, p, 'tipoSel', [['','Todos'],['SOAT','SOAT'],['OTROS','OTROS']], ()=>dibujarMapa(p,d));
+
+  // filtrar datos por año, mes y tipo
+  let regs = d.filter(x=>x.muniValle);
+  if(p.estado.anioSel) regs = regs.filter(x=>x.fecha.slice(0,4)===p.estado.anioSel);
+  if(p.estado.mesSel)  regs = regs.filter(x=>x.fecha.slice(5,7)===p.estado.mesSel);
+  if(p.estado.tipoSel){
+    regs = p.estado.tipoSel==='SOAT'
+      ? regs.filter(x=>x.tipo==='SOAT')
+      : regs.filter(x=>x.tipo!=='SOAT');
+  }
+
+  // sincronizar la tabla matriz vinculada (matrizmapa) con el mismo filtro de tipo
+  if(p.graficaVinculada===undefined){ /* el mapa es el "gráfico"; la matriz lo referencia */ }
+  const matrizMapa = PANELES.find(q=>q.graficaVinculada===p.id);
+  if(matrizMapa){
+    matrizMapa.estado.tipoFiltro = p.estado.tipoSel || '';
+    if(document.getElementById('tab_'+matrizMapa.id)) dibujarPanel(matrizMapa);
+  }
+
+  // conteo por municipio (Otros se cuenta pero no se pinta en el mapa)
+  const conteo = {};
+  regs.forEach(x=>{ conteo[x.muniValle]=(conteo[x.muniValle]||0)+1; });
+  const maxV = Math.max(1, ...Object.entries(conteo).filter(([k])=>k!=='Otros').map(([,v])=>v));
+
+  // conteo del PERIODO ANTERIOR (para la variación %) según el nivel de selección
+  const conteoPrev = periodoAnteriorMapa(d, p.estado);
+  const variacionMun = (nombre)=>{
+    const act = conteo[nombre]||0;
+    const prev = conteoPrev ? (conteoPrev[nombre]||0) : null;
+    if(prev===null) return null;              // no hay periodo previo comparable
+    if(prev===0) return act>0 ? 100 : null;
+    return ((act-prev)/prev)*100;
+  };
+
+  // --- proyección simple lon/lat -> SVG ---
+  const W=520, H=560, pad=10;
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  VALLE_GEOJSON.features.forEach(f=>{
+    recorrerCoords(f.geometry, (lon,lat)=>{
+      if(lon<minX)minX=lon; if(lon>maxX)maxX=lon;
+      if(lat<minY)minY=lat; if(lat>maxY)maxY=lat;
+    });
+  });
+  const escX = (W-2*pad)/(maxX-minX);
+  const escY = (H-2*pad)/(maxY-minY);
+  const esc = Math.min(escX, escY);
+  const offX = pad + ((W-2*pad)-(maxX-minX)*esc)/2;
+  const offY = pad + ((H-2*pad)-(maxY-minY)*esc)/2;
+  const proj = (lon,lat)=>[ offX+(lon-minX)*esc, offY+(maxY-lat)*esc ]; // y invertida
+
+  // color de calor (verde claro -> azul Dolormed) según intensidad
+  const colorDe = (v)=>{
+    if(!v) return '#EAEEF2';
+    const t = v/maxV;
+    const c1=[206,219,40], c2=[42,65,97];
+    const r=Math.round(c1[0]+(c2[0]-c1[0])*t);
+    const g=Math.round(c1[1]+(c2[1]-c1[1])*t);
+    const b=Math.round(c1[2]+(c2[2]-c1[2])*t);
+    return `rgb(${r},${g},${b})`;
+  };
+
+  // construir paths + etiquetas (cantidad y variación) en el centro de cada municipio
+  let paths='';
+  let etiquetas='';
+  VALLE_GEOJSON.features.forEach(f=>{
+    const nombre=f.properties.nombre;
+    const v=conteo[nombre]||0;
+    const dPath = geomAPath(f.geometry, proj);
+    paths += `<path d="${dPath}" fill="${colorDe(v)}" stroke="#fff" stroke-width="0.8"
+                 class="mun-path" data-nombre="${nombre}" data-valor="${v}">
+                <title>${nombre}: ${v} paciente${v===1?'':'s'}</title></path>`;
+    // etiqueta solo si hay pacientes (evita saturar el mapa con ceros)
+    if(v>0){
+      const [cx,cy] = centroide(f.geometry, proj);
+      const claro = v/maxV>0.5;   // fondo oscuro -> texto claro
+      const colTxt = claro ? '#fff' : '#2A4161';
+      const pct = variacionMun(nombre);
+      let varTxt='';
+      if(pct!==null){
+        const signo = pct>0?'▲':(pct<0?'▼':'');
+        const colVar = claro ? '#EAF6E1' : (pct>0?'#2E7D22':(pct<0?'#B3261E':'#6B7785'));
+        varTxt = `<tspan x="${cx.toFixed(1)}" dy="10" font-size="7" fill="${colVar}" font-weight="700">${signo}${Math.abs(pct).toFixed(0)}%</tspan>`;
+      }
+      etiquetas += `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle"
+                      font-size="10" font-weight="800" fill="${colTxt}" style="pointer-events:none">
+                      ${v}${varTxt}</text>`;
+    }
+  });
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-height:560px">${paths}${etiquetas}</svg>`;
+  document.getElementById('mapasvg_'+p.id).innerHTML = svg;
+
+  // leyenda de gradiente
+  const periodo = (p.estado.mesSel? MESES_CORTO[parseInt(p.estado.mesSel)-1]+' ' : '') + (p.estado.anioSel || 'todo el periodo');
+  const notaVar = conteoPrev ? '<div style="font-size:.68rem;color:var(--texto-suave);margin-top:6px">▲▼ variación vs periodo anterior</div>' : '';
+  document.getElementById('mapaleyenda_'+p.id).innerHTML = `
+    <div class="leyenda-tit">Pacientes por municipio<br><span style="font-weight:600;color:var(--texto-suave)">${periodo}</span></div>
+    <div class="grad-barra"></div>
+    <div class="grad-labels"><span>0</span><span>${maxV}</span></div>${notaVar}`;
+
+  // ranking lateral (incluye Otros)
+  const rank = Object.entries(conteo).sort((a,b)=>b[1]-a[1]);
+  const totalRank = rank.reduce((a,[,v])=>a+v,0);
+  document.getElementById('maparank_'+p.id).innerHTML =
+    '<div class="rank-tit">Detalle</div>' +
+    rank.map(([k,v])=>{
+      const pct = totalRank? Math.round(v/totalRank*100):0;
+      const esOtros = k==='Otros';
+      return `<div class="rank-fila ${esOtros?'otros':''}"><span class="rk-n">${k}</span><span class="rk-v">${v}</span><span class="rk-p">${pct}%</span></div>`;
+    }).join('') +
+    `<div class="rank-fila total"><span class="rk-n">Total</span><span class="rk-v">${totalRank}</span><span class="rk-p">100%</span></div>`;
+}
+
+// recorre todas las coords de una geometría
+function recorrerCoords(geom, fn){
+  const walk = (c)=>{
+    if(typeof c[0]==='number'){ fn(c[0],c[1]); return; }
+    c.forEach(walk);
+  };
+  walk(geom.coordinates);
+}
+// convierte geometría (Polygon/MultiPolygon) a path SVG
+function geomAPath(geom, proj){
+  let d='';
+  const anillo = (ring)=>{
+    ring.forEach((pt,i)=>{
+      const [x,y]=proj(pt[0],pt[1]);
+      d += (i===0?'M':'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+    });
+    d += 'Z';
+  };
+  if(geom.type==='Polygon'){ geom.coordinates.forEach(anillo); }
+  else if(geom.type==='MultiPolygon'){ geom.coordinates.forEach(poly=>poly.forEach(anillo)); }
+  return d;
+}
+// centroide aproximado (promedio de vértices del anillo mayor) proyectado a SVG
+function centroide(geom, proj){
+  // usar el primer anillo del polígono más grande
+  let ring;
+  if(geom.type==='Polygon'){ ring = geom.coordinates[0]; }
+  else { // MultiPolygon: el polígono con más puntos
+    let mejor=null, max=0;
+    geom.coordinates.forEach(poly=>{ if(poly[0].length>max){max=poly[0].length; mejor=poly[0];} });
+    ring = mejor;
+  }
+  let sx=0, sy=0;
+  ring.forEach(pt=>{ sx+=pt[0]; sy+=pt[1]; });
+  const lon=sx/ring.length, lat=sy/ring.length;
+  return proj(lon, lat);
+}
+// conteo por municipio del periodo inmediatamente anterior al seleccionado.
+// Devuelve null si no hay un periodo previo comparable (p. ej. "Todos / Todos").
+function periodoAnteriorMapa(d, estado){
+  const conteoDe = (anio, mes)=>{
+    const c={};
+    d.forEach(x=>{
+      if(!x.muniValle) return;
+      if(anio && x.fecha.slice(0,4)!==anio) return;
+      if(mes && x.fecha.slice(5,7)!==mes) return;
+      c[x.muniValle]=(c[x.muniValle]||0)+1;
+    });
+    return c;
+  };
+  if(estado.anioSel && estado.mesSel){
+    // mes anterior (puede cambiar de año)
+    let y=parseInt(estado.anioSel), m=parseInt(estado.mesSel)-1;
+    if(m<1){ m=12; y-=1; }
+    return conteoDe(String(y), String(m).padStart(2,'0'));
+  }
+  if(estado.anioSel && !estado.mesSel){
+    // año anterior completo
+    return conteoDe(String(parseInt(estado.anioSel)-1), '');
+  }
+  // "Todos" (sin año) -> no hay periodo previo comparable
+  return null;
+}
+// selector de botones para el mapa (año/mes)
+function pintarSelectorMapa(idCont, p, clave, opciones, onChange){
+  const cont=document.getElementById(idCont);
+  if(!cont) return;
+  const et = cont.querySelector('.et');
+  const etTxt = et?et.textContent:'';
+  cont.innerHTML = `<span class="et">${etTxt}</span>` + opciones.map(([val,txt])=>
+    `<button class="cbtn ${String(p.estado[clave])===String(val)?'on':''}" data-val="${val}">${txt}</button>`
+  ).join('');
+  cont.querySelectorAll('.cbtn').forEach(b=>{
+    b.addEventListener('click', ()=>{ p.estado[clave]=b.dataset.val; if(clave==='anioSel') p.estado.mesSel=''; onChange(); });
+  });
+}
+
+function dibujarMatriz(p, d){
+  // filtro de tipo (usado por la matriz del mapa, sincronizado con sus botones SOAT/OTROS)
+  if(p.estado.tipoFiltro){
+    d = p.estado.tipoFiltro==='SOAT' ? d.filter(x=>x.tipo==='SOAT') : d.filter(x=>x.tipo!=='SOAT');
+  }
+  // determinar qué campo agrupa la matriz: medios (alto/bajo) o un campo directo (arl/particular/poliza)
+  let regs, nombreDe;
+  if(p.campoMatriz && p.campoMatriz!=='alto' && p.campoMatriz!=='bajo'){
+    // campo directo del registro (arl, particular, poliza, ...)
+    regs = d.filter(x=> x[p.campoMatriz]);
+    nombreDe = x => x[p.campoMatriz];
+  } else {
+    // En Zarzal y Cerrito no hay tabla separada de "bajo volumen", así que la matriz
+    // de esta sección (Alto Valor / Clientes) muestra todos los medios de ingreso.
+    const todosLosMedios = p.medioSet==='alto' && (contexto.sede==='Zarzal' || contexto.sede==='Cerrito');
+    regs = d.filter(x=> x.medioMatriz && (todosLosMedios || x.medioMatriz.set === p.medioSet)
+      && !(p.medioSet==='alto' && !todosLosMedios && x.medioMatriz.nombre==='Reconsulta'));
+    nombreDe = x => x.medioMatriz.nombre;
+  }
+
+  const clavesMes = [...new Set(regs.map(x=>x.fecha.slice(0,7)))].sort();
+  const porAnioTodos = {};
+  clavesMes.forEach(k=>{ const [y,m]=k.split('-'); (porAnioTodos[y]=porAnioTodos[y]||[]).push(m); });
+  const aniosDisponibles = Object.keys(porAnioTodos).sort();
+
+  // botón de selección por año
+  pintarBotonAnioMatriz(p, aniosDisponibles);
+
+  const anios = (p.estado.anioSel && porAnioTodos[p.estado.anioSel])
+    ? [p.estado.anioSel]
+    : aniosDisponibles;
+  const porAnio = {}; anios.forEach(y=> porAnio[y]=porAnioTodos[y]);
+
+  // matriz medio -> mesKey -> conteo
+  const medios = {};
+  regs.forEach(x=>{
+    const med = nombreDe(x), k = x.fecha.slice(0,7);
+    medios[med] = medios[med] || {};
+    medios[med][k] = (medios[med][k]||0)+1;
+  });
+
+  // total de un medio en los años visibles (para ordenar y descartar ceros)
+  const totalMedioEnAnios = med => {
+    let t=0; anios.forEach(y=> porAnio[y].forEach(m=> t+=(medios[med][`${y}-${m}`]||0)) ); return t;
+  };
+  let filasMedios = Object.keys(medios)
+    .filter(med => totalMedioEnAnios(med) > 0)
+    .sort((a,b)=>totalMedioEnAnios(b)-totalMedioEnAnios(a));
+
+  // botón Top (para reducir la tabla) — opciones según cantidad de filas disponibles
+  pintarBotonTopMatriz(p, filasMedios.length);
+  // aplicar recorte Top si está activo (0 = todos)
+  if(p.estado.topSel && p.estado.topSel>0){
+    filasMedios = filasMedios.slice(0, p.estado.topSel);
+  }
+
+  const cont = document.getElementById('tab_'+p.id);
+  if(!filasMedios.length){ cont.innerHTML='<div class="vacio" style="padding:30px">Sin datos para este periodo</div>'; matrizDatos[p.id]=null; return; }
+
+  // ---- Encabezados ----
+  // Por cada año: [mes, Δ%] x meses + Prom + Máx + Subtotal
   let thAnios = '<th class="esq" rowspan="2">Medio de ingreso</th>';
   let thMeses = '';
   anios.forEach(y=>{
